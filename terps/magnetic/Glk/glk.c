@@ -5804,6 +5804,24 @@ static const type8 GMS_FILE_SUCCESS = 0,
  *
  * Save the current game state to a file, and load a game state.
  */
+#ifdef QUENGLE
+/* quengle: a name the game asked for (pre-v4 games prompt in their own text) is a save in the player's saves
+   folder, not a file next to the game: the host maps /quengle/save/ onto it. path separators can't escape it */
+static const char *
+quengle_save_path (const type8s * name)
+{
+  static char path[256];
+  int i, n = snprintf (path, sizeof path, "/quengle/save/%s", (const char *) name);
+  for (i = (int) sizeof "/quengle/save/" - 1; i < n && path[i]; i++)
+    if (path[i] == '/' || path[i] == '\\')
+      path[i] = '_';
+  return path;
+}
+#define GMS_SAVE_NAME(name) quengle_save_path (name)
+#else
+#define GMS_SAVE_NAME(name) ((const char *) (name))
+#endif
+
 type8
 ms_save_file (type8s * name, type8 * ptr, type16 size)
 {
@@ -5845,7 +5863,7 @@ ms_save_file (type8s * name, type8 * ptr, type16 size)
        * If openable for read, assume the file already exists and confirm
        * overwrite.
        */
-      stream = fopen (name, "r");
+      stream = fopen (GMS_SAVE_NAME (name), "r");
       if (stream)
         {
           fclose (stream);
@@ -5860,7 +5878,7 @@ ms_save_file (type8s * name, type8 * ptr, type16 size)
         }
 
       /* Open output file directly.  There's no Glk way to achieve this. */
-      stream = fopen (name, "wb");
+      stream = fopen (GMS_SAVE_NAME (name), "wb");
       if (!stream)
         return GMS_FILE_ERROR;
 
@@ -5928,7 +5946,7 @@ ms_load_file (type8s * name, type8 * ptr, type16 size)
        * Open the input file directly.  As above, there's no Glk way to
        * achieve this.
        */
-      stream = fopen (name, "rb");
+      stream = fopen (GMS_SAVE_NAME (name), "rb");
       if (!stream)
         return GMS_FILE_ERROR;
 
