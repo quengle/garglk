@@ -128,9 +128,14 @@ static void LineInput(void)
            capitalization logic treats the prompt as a fresh sentence. */
         LastChar = '\n';
 #ifdef QUENGLE
-        /* quengle: the state at the prompt is the autosave */
+        /* quengle: the state at the prompt is the autosave; after a continue the replayed screen already ends
+           with the prompt */
+        extern int QuengleSkipPrompt;
         extern void QuengleAutosave(void);
         QuengleAutosave();
+        if (QuengleSkipPrompt) {
+            QuengleSkipPrompt = 0;
+        } else
 #endif
         if (Version == QUESTPROBE3_TYPE) {
             /* QP3 prefixes the prompt with the active character's name

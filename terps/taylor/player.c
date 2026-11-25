@@ -295,7 +295,10 @@ void Inventory(void)
 
 #ifdef QUENGLE
 #include "glkstart.h"
-/* quengle: autosave: Flag and ObjectLoc, as SaveGame writes them, at each line input (parseinput.c) */
+/* quengle: autosave: Flag and ObjectLoc, as SaveGame writes them, at each line input (parseinput.c), read once at
+   startup (glk_main). the screen comes back from the host's replay (host.js), so nothing is printed then */
+int QuengleSkipPrompt = 0;
+
 static strid_t QuengleAutosaveStream(glui32 mode)
 {
     frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_BinaryMode,
@@ -309,6 +312,16 @@ static strid_t QuengleAutosaveStream(glui32 mode)
     return s;
 }
 
+static int QuengleHasAutosave(void)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_BinaryMode,
+        "/autosave/taylor.sav", 0);
+    int exists = fref != NULL && glk_fileref_does_file_exist(fref);
+    if (fref != NULL)
+        glk_fileref_destroy(fref);
+    return exists;
+}
+
 void QuengleAutosave(void)
 {
     strid_t file = QuengleAutosaveStream(filemode_Write);
@@ -317,6 +330,23 @@ void QuengleAutosave(void)
     glk_put_buffer_stream(file, (char *)Flag, sizeof(Flag));
     glk_put_buffer_stream(file, (char *)ObjectLoc, sizeof(ObjectLoc));
     glk_stream_close(file, NULL);
+}
+
+/* 1 when the autosave was read and fits this game */
+static int QuengleRestoreAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Read);
+    if (file == NULL)
+        return 0;
+    SavedState *state = SaveCurrentState();
+    int ok = glk_get_buffer_stream(file, (char *)Flag, sizeof(Flag)) == sizeof(Flag)
+        && glk_get_buffer_stream(file, (char *)ObjectLoc, sizeof(ObjectLoc)) == sizeof(ObjectLoc);
+    glk_stream_close(file, NULL);
+    if (!ok)
+        RecoverFromBadRestore(state);
+    else
+        free(state);
+    return ok;
 }
 #endif
 
@@ -797,6 +827,11 @@ void glk_main(void)
 
     /* If the loaded file carried a ZX Spectrum loading screen, show it as
        a title image before the game proper begins. */
+#ifdef QUENGLE
+    /* quengle: a continue goes straight back to the game */
+    int quengle_resumed = QuengleHasAutosave();
+    if (!quengle_resumed)
+#endif
     DrawZXTitleImage();
 
     /* Temple of Terror ships as a paired text+graphics duo; check whether
@@ -821,6 +856,20 @@ void glk_main(void)
     FindTables();
     InitActionDebugging();
 
+#ifdef QUENGLE
+    if (quengle_resumed) {
+        NewGame();
+        NumLowObjects = GuessLowObjectEnd();
+        InitialState = SaveCurrentState();
+        if (QuengleRestoreAutosave()) {
+            InKaylethPreview = 0;
+            JustStarted = 0;
+            QuengleSkipPrompt = 1;
+        } else {
+            StartGame();
+        }
+    } else
+#endif
     StartGame();
 
     /* Main turn loop: snapshot undo state, read a command, execute it,
