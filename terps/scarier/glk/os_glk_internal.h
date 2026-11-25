@@ -398,6 +398,11 @@ extern int gsc_a5_sound_ok;
 extern schanid_t gsc_a5_channels[GSC_A5_MAX_CHANNELS];
 extern glui32 gsc_a5_chan_sound[GSC_A5_MAX_CHANNELS];
 #ifdef QUENGLE
+#include <vector>
+/* os_glk_quengle.cpp: undo snapshots stored as line diffs against the next newer state. encode falls back to the
+ * whole target when its diff doesn't decode back to it exactly; decode takes either form */
+extern std::string quengle_diff_encode (const std::string &base, const std::string &target);
+extern bool quengle_diff_decode (const std::string &base, const std::string &stored, std::string *target);
 /* os_glk_quengle.cpp: whether each channel's sound loops, so a continue restarts it the same way */
 extern int gsc_a5_chan_loop[GSC_A5_MAX_CHANNELS];
 #endif

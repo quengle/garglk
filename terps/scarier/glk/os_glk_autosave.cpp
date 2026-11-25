@@ -338,6 +338,24 @@ gsc_a5_serialize_all (void)
 
   std::string out = GSC_A5_CONTAINER_MAGIC;
   gsc_container_put_chunk (out, blob, length);
+#ifdef QUENGLE
+  /* each undo snapshot as a line diff against the next newer state, the newest against this one */
+  std::string newer (blob, length);
+  std::vector<std::string> undo_chunks;
+
+  undo_chunks.resize ((size_t) a5run_undo_depth (gsc_a5_run));
+  for (i = (int) undo_chunks.size () - 1; i >= 0; i--)
+    {
+      const char *turn_text;
+      size_t blob_length = 0, turn_length = 0;
+      const char *undo_blob = a5run_undo_peek (gsc_a5_run, i, &blob_length,
+                                               &turn_text, &turn_length);
+      std::string older (undo_blob, blob_length);
+
+      undo_chunks[(size_t) i] = quengle_diff_encode (newer, older);
+      newer.swap (older);
+    }
+#endif
   free (blob);
 
   a5run_get_turn_text (gsc_a5_run, &text, &text_length);
@@ -353,7 +371,12 @@ gsc_a5_serialize_all (void)
       const char *undo_blob = a5run_undo_peek (gsc_a5_run, i, &blob_length,
                                                &turn_text, &turn_length);
 
+#ifdef QUENGLE
+      (void) undo_blob;
+      gsc_container_put_chunk (out, undo_chunks[(size_t) i].data (), undo_chunks[(size_t) i].size ());
+#else
       gsc_container_put_chunk (out, undo_blob, blob_length);
+#endif
       gsc_container_put_chunk (out, turn_text, turn_length);
     }
 
@@ -389,6 +412,9 @@ gsc_a5_apply_all (const std::string &data)
     return false;
   if (!a5run_restore (gsc_a5_run, chunk.data (), chunk.size ()))
     return false;
+#ifdef QUENGLE
+  const std::string state = chunk;
+#endif
 
   /* As on the scare side, a truncated undo tail is not fatal. */
   if (!gsc_container_get_chunk (data, &pos, &chunk))
@@ -397,6 +423,39 @@ gsc_a5_apply_all (const std::string &data)
 
   if (!gsc_container_get_count (data, &pos, &depth))
     return true;
+#ifdef QUENGLE
+  {
+    /* the diffs chain from the newest: read them all, rebuild newest first, push oldest first */
+    std::vector<std::string> blobs, texts;
+
+    for (i = 0; i < depth; i++)
+      {
+        if (!gsc_container_get_chunk (data, &pos, &chunk)
+            || !gsc_container_get_chunk (data, &pos, &turn_chunk))
+          return true;
+        blobs.push_back (chunk);
+        texts.push_back (turn_chunk);
+      }
+    const std::string *newer = &state;
+    for (i = depth - 1; i >= 0; i--)
+      {
+        std::string older;
+
+        if (!quengle_diff_decode (*newer, blobs[(size_t) i], &older))
+          {
+            /* a broken link loses this snapshot and every older one: undo stops short, the game is fine */
+            blobs.erase (blobs.begin (), blobs.begin () + i + 1);
+            texts.erase (texts.begin (), texts.begin () + i + 1);
+            break;
+          }
+        blobs[(size_t) i].swap (older);
+        newer = &blobs[(size_t) i];
+      }
+    for (size_t k = 0; k < blobs.size (); k++)
+      a5run_undo_push_blob (gsc_a5_run, blobs[k].data (), blobs[k].size (),
+                            texts[k].data (), texts[k].size ());
+  }
+#else
   for (i = 0; i < depth; i++)
     {
       if (!gsc_container_get_chunk (data, &pos, &chunk)
@@ -405,6 +464,7 @@ gsc_a5_apply_all (const std::string &data)
       a5run_undo_push_blob (gsc_a5_run, chunk.data (), chunk.size (),
                             turn_chunk.data (), turn_chunk.size ());
     }
+#endif
 
   /* Absent from an autosave written before the question was carried; the
      game then resumes at a fresh prompt, as it always did. */

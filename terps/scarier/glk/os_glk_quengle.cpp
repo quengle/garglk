@@ -30,7 +30,9 @@ extern "C" {
 #include "glkstart.h"
 }
 
+#include <algorithm>
 #include <sstream>
+#include <unordered_map>
 #include <zlib.h>
 
 static const char *const QUENGLE_AUTOSAVE_PATH = "/autosave/scarier.sav";
@@ -194,6 +196,185 @@ scarier_autosave_read_game (std::string *out)
       return false;
   }
   return true;
+}
+
+/*
+ * undo snapshots as line diffs. consecutive a5 snapshots differ in a few dozen of ~15k lines (lost coastlines:
+ * 1.3 KB of 269 KB), and deflate's 32 KB window can't see that across whole snapshots. stored forms:
+ *   "QD1\n" then ops: "C<first> <count>\n" copies base lines, "A<bytes>\n<bytes>" adds whole lines
+ *   "QR1\n" then the target itself (the diff didn't round-trip, or there was nothing to gain)
+ * a line keeps its '\n'; only the last may lack one.
+ */
+static void
+quengle_split_lines (const std::string &s, std::vector<std::pair<size_t, size_t> > *lines)
+{
+  size_t start = 0;
+
+  while (start < s.size ())
+    {
+      size_t eol = s.find ('\n', start);
+      size_t end = eol == std::string::npos ? s.size () : eol + 1;
+
+      lines->push_back (std::make_pair (start, end - start));
+      start = end;
+    }
+}
+
+bool
+quengle_diff_decode (const std::string &base, const std::string &stored, std::string *target)
+{
+  std::vector<std::pair<size_t, size_t> > lines;
+  size_t pos = 4;
+
+  if (stored.compare (0, 4, "QR1\n") == 0)
+    {
+      target->assign (stored, 4, std::string::npos);
+      return true;
+    }
+  if (stored.compare (0, 4, "QD1\n") != 0)
+    return false;
+  quengle_split_lines (base, &lines);
+  target->clear ();
+  while (pos < stored.size ())
+    {
+      size_t eol = stored.find ('\n', pos);
+      char op = stored[pos];
+
+      if (eol == std::string::npos)
+        return false;
+      if (op == 'C')
+        {
+          char *rest;
+          unsigned long first = strtoul (stored.c_str () + pos + 1, &rest, 10);
+          unsigned long count = strtoul (rest, nullptr, 10);
+
+          if (first > lines.size () || count > lines.size () - first)
+            return false;
+          for (unsigned long k = first; k < first + count; k++)
+            target->append (base, lines[k].first, lines[k].second);
+          pos = eol + 1;
+        }
+      else if (op == 'A')
+        {
+          unsigned long bytes = strtoul (stored.c_str () + pos + 1, nullptr, 10);
+
+          if (bytes > stored.size () - (eol + 1))
+            return false;
+          target->append (stored, eol + 1, bytes);
+          pos = eol + 1 + bytes;
+        }
+      else
+        return false;
+    }
+  return true;
+}
+
+static std::string quengle_diff_compute (const std::string &base, const std::string &target);
+
+/* every turn diffs the whole stack, but only the newest link is new: the rest come from here */
+std::string
+quengle_diff_encode (const std::string &base, const std::string &target)
+{
+  static std::unordered_map<std::string, std::string> cache;
+  std::hash<std::string> hash;
+  std::string key = std::to_string (hash (base)) + ' ' + std::to_string (base.size ()) + ' '
+                    + std::to_string (hash (target)) + ' ' + std::to_string (target.size ());
+  auto found = cache.find (key);
+
+  if (found != cache.end ())
+    return found->second;
+  if (cache.size () > 64)
+    cache.clear ();
+  return cache[key] = quengle_diff_compute (base, target);
+}
+
+static std::string
+quengle_diff_compute (const std::string &base, const std::string &target)
+{
+  std::vector<std::pair<size_t, size_t> > bl, tl;
+  std::unordered_map<std::string, std::vector<size_t> > where;
+  std::string out = "QD1\n", added, check;
+  size_t t = 0, bp = 0;
+
+  quengle_split_lines (base, &bl);
+  quengle_split_lines (target, &tl);
+  for (size_t k = 0; k < bl.size (); k++)
+    where[base.substr (bl[k].first, bl[k].second)].push_back (k);
+
+  auto same = [&] (size_t b, size_t tt) {
+    return bl[b].second == tl[tt].second
+           && base.compare (bl[b].first, bl[b].second, target, tl[tt].first, tl[tt].second) == 0;
+  };
+  auto run_from = [&] (size_t b, size_t tt) {
+    size_t n = 0;
+    while (b + n < bl.size () && tt + n < tl.size () && same (b + n, tt + n))
+      n++;
+    return n;
+  };
+  auto flush_added = [&] () {
+    if (added.empty ())
+      return;
+    out += 'A';
+    out += std::to_string ((unsigned long) added.size ());
+    out += '\n';
+    out += added;
+    added.clear ();
+  };
+
+  while (t < tl.size ())
+    {
+      size_t best = 0, best_at = 0;
+
+      if (bp < bl.size () && same (bp, t))
+        {
+          best = run_from (bp, t);
+          best_at = bp;
+        }
+      else
+        {
+          /* the nearest few places this line occurs in the base, at or after where we are, then before */
+          auto found = where.find (target.substr (tl[t].first, tl[t].second));
+
+          if (found != where.end ())
+            {
+              const std::vector<size_t> &at = found->second;
+              size_t from = (size_t) (std::lower_bound (at.begin (), at.end (), bp) - at.begin ());
+
+              for (size_t k = from; k < at.size () && k < from + 4; k++)
+                {
+                  size_t n = run_from (at[k], t);
+                  if (n > best) { best = n; best_at = at[k]; }
+                }
+              for (size_t k = from; k > 0 && k + 4 > from; k--)
+                {
+                  size_t n = run_from (at[k - 1], t);
+                  if (n > best) { best = n; best_at = at[k - 1]; }
+                }
+            }
+          /* a lone common line ("</Object>") costs more as a copy than as text */
+          if (best < 2 && t + best < tl.size ())
+            best = 0;
+        }
+      if (best == 0)
+        {
+          added.append (target, tl[t].first, tl[t].second);
+          t++;
+          continue;
+        }
+      flush_added ();
+      out += 'C';
+      out += std::to_string ((unsigned long) best_at);
+      out += ' ';
+      out += std::to_string ((unsigned long) best);
+      out += '\n';
+      t += best;
+      bp = best_at + best;
+    }
+  flush_added ();
+
+  if (out.size () >= target.size () || !quengle_diff_decode (base, out, &check) || check != target)
+    return "QR1\n" + target;
+  return out;
 }
 
 bool
