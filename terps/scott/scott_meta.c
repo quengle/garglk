@@ -419,6 +419,29 @@ static glui32 GetKeyPress(int unicode)
     return ev.val1;
 }
 
+#ifdef QUENGLE
+/* quengle: a line's first letter. a single-key wait has nothing to type into on an ipad without a keyboard: a tap,
+   or the key bar's return, sent return ("answer yes or no" forever). a line gets the prompt, the keyboard, the key
+   bar: "yes", "y", "No" all do */
+static glui32 QuengleFirstLetter(void)
+{
+    static char buf[64];
+    event_t ev;
+    glui32 i;
+
+    glk_request_line_event(Bottom, buf, sizeof buf - 1, 0);
+    do {
+        glk_select(&ev);
+        if (ev.type != evtype_LineInput)
+            Updates(ev);
+    } while (ev.type != evtype_LineInput);
+    for (i = 0; i < ev.val1; i++)
+        if ((unsigned char)buf[i] > ' ')
+            return (unsigned char)buf[i];
+    return 0;
+}
+#endif
+
 /* Prompt for a yes/no response via single-character input.
    Uses the localized first characters of sys[YES] and sys[NO]. */
 int YesOrNo(void)
@@ -428,17 +451,23 @@ int YesOrNo(void)
     const char n = tolower((unsigned char)sys[NO][0]);
 
     do {
+#ifdef QUENGLE
+        glui32 key = QuengleFirstLetter();
+#else
         glui32 key = GetKeyPress(1);
         if ((glsi32)key > ' ') {
             glk_put_char_stream_uni(glk_window_get_stream(Bottom), key);
         }
+#endif
         const char reply = key < 0x100 ? tolower((int)key) : 0;
         if (reply == y) {
             result = 1;
         } else if (reply == n) {
             result = 2;
         } else {
+#ifndef QUENGLE
             Output("\n");
+#endif
             Output(sys[ANSWER_YES_OR_NO]);
         }
     } while (result == 0);
