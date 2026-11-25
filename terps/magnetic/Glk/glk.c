@@ -2364,7 +2364,12 @@ gms_graphics_timeout (void)
    * If animated, and if animations are enabled, handle further animation
    * frames, if any.
    */
+#ifdef QUENGLE
+  /* quengle: first frame only for now; every further frame would be one more image kept by remglk and the display */
+  if (FALSE)
+#else
   if (gms_animation_enabled && gms_graphics_animated)
+#endif
     {
       int more_animation;
 
