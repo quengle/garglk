@@ -644,6 +644,10 @@ static int gms_graphics_pixel = 2;
 
 /* Proportion of the display to use for graphics. */
 static glui32 gms_graphics_proportion = 60;
+#ifdef QUENGLE
+/* the share quengle_graphics_draw last gave the graphics window; 0 for a fresh window (gms_graphics_proportion) */
+static glui32 quengle_proportion = 0;
+#endif
 
 /* Height, in pixels, of the graphics window. Takes precendence over
  * gms_graphics_pixel. If 0, ignore.
@@ -728,6 +732,9 @@ gms_graphics_open (void)
 {
   if (!gms_graphics_window)
     {
+#ifdef QUENGLE
+      quengle_proportion = 0;
+#endif
       if (gms_graphics_height_pixels > 0)
         {
           gms_graphics_window = glk_window_open (gms_main_window,
@@ -1254,8 +1261,14 @@ gms_graphics_clear_and_border (winid_t glk_window, int x_offset, int y_offset,
    * Set the graphics window background to match the main window background,
    * as best as we can tell, and clear the window.
    */
+#ifndef QUENGLE
   glk_window_set_background_color (glk_window, background);
+#endif
   glk_window_clear (glk_window);
+#ifdef QUENGLE
+  /* quengle: no border or shading: they're sized for glk.c's whole-pixel scaling, not the fitted image */
+  return;
+#endif
 
   /*
    * For very small pictures, just border them, but don't try and do any
@@ -1867,6 +1880,184 @@ gms_graphics_paint_everything (winid_t glk_window, glui32 palette[],
 }
 #endif
 
+#ifdef QUENGLE
+/* quengle: pictures go to the display whole, as a png image drawn scaled into the graphics window, in place of
+   glk.c's region painting (thousands of fill rects, 256 per 50 ms tick: the picture visibly built up over seconds).
+   the png is indexed, uncompressed (stored deflate blocks): small pictures, and no zlib in the build */
+glui32 quengle_add_image (const unsigned char *buf, glui32 len);
+
+static glui32
+quengle_crc (const unsigned char *p, size_t n)
+{
+  static glui32 table[256];
+  glui32 crc = 0xffffffffu;
+  size_t i;
+  if (!table[1])
+    for (i = 0; i < 256; i++)
+      {
+        glui32 c = (glui32) i;
+        int k;
+        for (k = 0; k < 8; k++)
+          c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
+        table[i] = c;
+      }
+  for (i = 0; i < n; i++)
+    crc = table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
+  return ~crc;
+}
+
+static unsigned char *
+quengle_put32be (unsigned char *p, glui32 v)
+{
+  p[0] = (unsigned char) (v >> 24);
+  p[1] = (unsigned char) (v >> 16);
+  p[2] = (unsigned char) (v >> 8);
+  p[3] = (unsigned char) v;
+  return p + 4;
+}
+
+static unsigned char *
+quengle_png (const type8 pixels[], int width, int height, const glui32 palette[], glui32 *out_len)
+{
+  glui32 raw = (glui32) height * (glui32) (width + 1);   /* a filter byte per row */
+  glui32 blocks = (raw + 65534) / 65535;
+  glui32 idat = 2 + raw + 5 * blocks + 4;
+  glui32 size = 8 + (12 + 13) + (12 + GMS_PALETTE_SIZE * 3) + (12 + idat) + 12;
+  glui32 a = 1, b = 0, left, i;
+  unsigned char *png, *p, *c;
+  int x = -1, y = 0;
+
+  if (raw == 0 || !(png = malloc (size)))
+    return NULL;
+  p = png;
+  memcpy (p, "\x89PNG\r\n\x1a\n", 8);
+  p += 8;
+
+  p = quengle_put32be (p, 13);
+  c = p;
+  memcpy (p, "IHDR", 4);
+  p = quengle_put32be (p + 4, (glui32) width);
+  p = quengle_put32be (p, (glui32) height);
+  *p++ = 8;  /* bit depth */
+  *p++ = 3;  /* indexed */
+  *p++ = 0;
+  *p++ = 0;
+  *p++ = 0;
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, GMS_PALETTE_SIZE * 3);
+  c = p;
+  memcpy (p, "PLTE", 4);
+  p += 4;
+  for (i = 0; i < GMS_PALETTE_SIZE; i++)
+    {
+      *p++ = (unsigned char) (palette[i] >> 16);
+      *p++ = (unsigned char) (palette[i] >> 8);
+      *p++ = (unsigned char) palette[i];
+    }
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, idat);
+  c = p;
+  memcpy (p, "IDAT", 4);
+  p += 4;
+  *p++ = 0x78;
+  *p++ = 0x01;
+  for (left = raw; left > 0;)
+    {
+      glui32 n = left < 65535 ? left : 65535;
+      left -= n;
+      *p++ = left ? 0 : 1;
+      *p++ = (unsigned char) n;
+      *p++ = (unsigned char) (n >> 8);
+      *p++ = (unsigned char) ~n;
+      *p++ = (unsigned char) (~n >> 8);
+      while (n--)
+        {
+          unsigned char v = x < 0 ? 0 : (unsigned char) pixels[y * width + x];
+          if (++x == width)
+            {
+              x = -1;
+              y++;
+            }
+          *p++ = v;
+          a = (a + v) % 65521;
+          b = (b + a) % 65521;
+        }
+    }
+  p = quengle_put32be (p, (b << 16) | a);
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, 0);
+  c = p;
+  memcpy (p, "IEND", 4);
+  p = quengle_put32be (p + 4, quengle_crc (c, 4));
+
+  *out_len = (glui32) (p - png);
+  return png;
+}
+
+/* at most glk.c's own 2x, and no more than this share of the screen's height: the rest is the story's */
+#define QUENGLE_MAX_SCALE 2.0
+#define QUENGLE_MAX_SHARE 40
+
+/* fresh: a new picture (else a repaint after a resize, same image). scaled to fit, centered; the window is then
+   resized to the picture (glk.c keeps it at 60% whatever the picture) */
+static void
+quengle_graphics_draw (const type8 off_screen[], const glui32 palette[], int fresh)
+{
+  static glui32 image = 0;
+  glui32 window_width, window_height, total, wanted;
+  double scale;
+  int width, height;
+
+  if (fresh || !image)
+    {
+      glui32 len;
+      unsigned char *png = quengle_png (off_screen, gms_graphics_width, gms_graphics_height, palette, &len);
+      if (!png)
+        return;
+      image = quengle_add_image (png, len);
+      free (png);
+    }
+  if (!image)
+    return;
+
+  glk_window_get_size (gms_graphics_window, &window_width, &window_height);
+  if (!quengle_proportion)
+    quengle_proportion = gms_graphics_proportion;
+  /* buffer windows measure in characters, so the screen's height comes from the share we're at */
+  total = window_height * 100 / quengle_proportion;
+  scale = (double) window_width / gms_graphics_width;
+  if (scale > QUENGLE_MAX_SCALE)
+    scale = QUENGLE_MAX_SCALE;
+  if ((double) total * QUENGLE_MAX_SHARE / 100 / gms_graphics_height < scale)
+    scale = (double) total * QUENGLE_MAX_SHARE / 100 / gms_graphics_height;
+  if (total > 0)
+    {
+      wanted = (glui32) ((gms_graphics_height * scale * 100 + total - 1) / total);
+      if (wanted < 1)
+        wanted = 1;
+      if (wanted != quengle_proportion)
+        {
+          /* remglk sends no arrange event for our own change; it has the new size right away */
+          quengle_proportion = wanted;
+          glk_window_set_arrangement (glk_window_get_parent (gms_graphics_window),
+                                      winmethod_Above | winmethod_Proportional, quengle_proportion, gms_graphics_window);
+          glk_window_get_size (gms_graphics_window, &window_width, &window_height);
+        }
+    }
+  if ((double) window_height / gms_graphics_height < scale)
+    scale = (double) window_height / gms_graphics_height;
+  width = (int) (gms_graphics_width * scale);
+  height = (int) (gms_graphics_height * scale);
+  if (width > 0 && height > 0)
+    glk_image_draw_scaled (gms_graphics_window, image,
+                           ((int) window_width - width) / 2, ((int) window_height - height) / 2, width, height);
+}
+#endif
+
+
 /*
  * gms_graphics_timeout()
  *
@@ -1912,6 +2103,9 @@ gms_graphics_timeout (void)
   if (!gms_graphics_active)
     return;
   assert (gms_graphics_window);
+#ifdef QUENGLE
+  int fresh = gms_graphics_new_picture;
+#endif
 
   /*
    * On detecting a repaint request, note the flag in a local static variable,
@@ -2062,7 +2256,9 @@ gms_graphics_timeout (void)
       deferred_repaint = FALSE;
     }
 
-#ifndef GARGLK
+#if defined (QUENGLE)
+  quengle_graphics_draw (off_screen, palette, fresh);
+#elif !defined (GARGLK)
   /*
    * Make a portion of an image pass, from lower to higher image layers,
    * scanning for invalidated pixels that are in the current image layer we
