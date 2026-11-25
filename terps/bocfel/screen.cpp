@@ -6625,13 +6625,15 @@ void zshogun_menu()
             auto addr = word(table + ((i + 1) * 2));
             int len = byte(addr++);
             ZASSERT(addr + len <= header.static_end, "menu table out of bounds (0x%lx to 0x%lx)", static_cast<unsigned long>(addr), static_cast<unsigned long>(addr + len));
-            std::stringstream ss;
-            ss << static_cast<char>(ordinals.at(i)) << ". ";
-            ss.write(reinterpret_cast<char *>(&memory[addr]), len);
+            // quengle: std::string, not std::stringstream; `ss << char` aborts in emglken's wasm (null call_indirect)
+            std::string ss;
+            ss += static_cast<char>(ordinals.at(i));
+            ss += ". ";
+            ss.append(reinterpret_cast<char *>(&memory[addr]), len);
             if (zargs[3] == i + 1) {
-                ss << "[default]";
+                ss += "[default]";
             }
-            for (const auto &c : ss.str()) {
+            for (const auto &c : ss) {
                 put_char(c);
             }
             put_char(ZSCII_NEWLINE);
