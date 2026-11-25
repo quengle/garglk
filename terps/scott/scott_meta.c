@@ -46,17 +46,12 @@ static strid_t OpenPromptedStream(glui32 usage, glui32 mode, int unicode,
     return file;
 }
 
-/* Save the current game state to a file via Glk file prompts.
-   Writes counters, room flags, bit flags, location, and item positions. */
-void SaveGame(void)
+/* Write the current game state to an open stream: counters, room flags,
+   bit flags, location, and item positions. */
+static void WriteSavedGame(strid_t file)
 {
     int ct;
     char buf[128];
-
-    strid_t file = OpenPromptedStream(fileusage_TextMode | fileusage_SavedGame,
-        filemode_Write, 0, NULL);
-    if (file == NULL)
-        return;
 
     SavedState *s = SaveCurrentState();
 
@@ -75,6 +70,17 @@ void SaveGame(void)
     }
 
     FreeSavedState(s);
+}
+
+/* Save the current game state to a file via Glk file prompts. */
+void SaveGame(void)
+{
+    strid_t file = OpenPromptedStream(fileusage_TextMode | fileusage_SavedGame,
+        filemode_Write, 0, NULL);
+    if (file == NULL)
+        return;
+
+    WriteSavedGame(file);
     glk_stream_close(file, NULL);
     Output(sys[SAVED]);
 }
