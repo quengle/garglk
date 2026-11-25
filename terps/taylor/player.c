@@ -293,6 +293,33 @@ void Inventory(void)
     }
 }
 
+#ifdef QUENGLE
+#include "glkstart.h"
+/* quengle: autosave: Flag and ObjectLoc, as SaveGame writes them, at each line input (parseinput.c) */
+static strid_t QuengleAutosaveStream(glui32 mode)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_BinaryMode,
+        "/autosave/taylor.sav", 0);
+    strid_t s = NULL;
+    if (fref == NULL)
+        return NULL;
+    if (mode == filemode_Write || glk_fileref_does_file_exist(fref))
+        s = glk_stream_open_file(fref, mode, 0);
+    glk_fileref_destroy(fref);
+    return s;
+}
+
+void QuengleAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Write);
+    if (file == NULL)
+        return;
+    glk_put_buffer_stream(file, (char *)Flag, sizeof(Flag));
+    glk_put_buffer_stream(file, (char *)ObjectLoc, sizeof(ObjectLoc));
+    glk_stream_close(file, NULL);
+}
+#endif
+
 void SaveGame(void)
 {
     strid_t file;
