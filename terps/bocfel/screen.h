@@ -127,6 +127,8 @@ void screen_read_bfhs(IO &io, SaveType savetype);
 IFF::TypeID screen_write_bfhs(IO &io);
 void screen_read_bfts(IO &io, uint32_t size);
 IFF::TypeID screen_write_bfts(IO &io);
+IFF::TypeID screen_write_lpal(IO &io); // quengle
+void screen_read_lpal(IO &io, uint32_t size); // quengle
 void screen_save_persistent_transcript();
 void screen_show_persistent_transcript();
 

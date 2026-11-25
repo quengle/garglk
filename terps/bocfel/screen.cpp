@@ -7235,6 +7235,28 @@ void screen_read_bfhs(IO &io, SaveType savetype)
     }
 }
 
+// quengle: the adaptive palette's base picture (current_palette) isn't in any other save state, so APal pictures
+// drawn after an autorestore came out unmapped, i.e. in the wrong colors
+IFF::TypeID screen_write_lpal(IO &io)
+{
+#ifdef ZTERP_GLK_GRAPHICS
+    if (current_palette.has_value()) {
+        io.write32(*current_palette);
+        return IFF::TypeID("LPal");
+    }
+#endif
+    return IFF::TypeID();
+}
+
+void screen_read_lpal(IO &io, uint32_t size)
+{
+#ifdef ZTERP_GLK_GRAPHICS
+    if (size == 4) {
+        current_palette = io.read32();
+    }
+#endif
+}
+
 IFF::TypeID screen_write_bfts(IO &io)
 {
     if (!options.persistent_transcript || !perstransio.has_value()) {
