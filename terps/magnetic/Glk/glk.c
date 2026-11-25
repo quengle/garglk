@@ -1889,6 +1889,7 @@ glui32 quengle_add_image (const unsigned char *buf, glui32 len);
 /* the picture last asked for, kept in emu.c's autosave so a continue can show it again */
 type32 quengle_picture = 0;
 type8 quengle_picture_mode = 0;
+static int quengle_continued = FALSE;
 
 static glui32
 quengle_crc (const unsigned char *p, size_t n)
@@ -6348,11 +6349,23 @@ gms_main (void)
   /* Try to identify the game from its text file header. */
   gms_gameid_identify_game (text_file);
 
+#ifdef QUENGLE
+  /* quengle: continue from the autosave (emu.c); the host replays the screen, so no banner either */
+  {
+    extern type8 quengle_restore (void);
+    if ((quengle_continued = quengle_restore ()))
+      goto quengle_resumed;
+  }
+#endif
+
   /* Print out a short banner. */
   gms_header_string ("\nMagnetic Scrolls Interpreter, version 2.3\n");
   gms_banner_string ("Written by Niclas Karlsson\n"
                      "Glk interface by Simon Baldwin\n\n");
 
+#ifdef QUENGLE
+quengle_resumed:
+#endif
   /* Look for failure to load just game graphics. */
   if (gms_graphics_possible && ms_init_status == 1)
     {
@@ -6365,6 +6378,12 @@ gms_main (void)
 
       gms_graphics_possible = FALSE;
     }
+
+#ifdef QUENGLE
+  /* the picture up when the autosave was taken: the replayed screen's copy names an image this run doesn't have */
+  if (quengle_continued && quengle_picture_mode && gms_graphics_possible)
+    ms_showpic (quengle_picture, quengle_picture_mode);
+#endif
 
   /* Run the game opcodes -- ms_rungame() returns FALSE on game end. */
   do
