@@ -80,15 +80,20 @@ extern "C" {
 #include "platform/scarier-autosave.h"
 #endif
 
-/* GSC_AUTOSAVE: the autosave/autorestore code, kept apart from the rest of
- * what SPATTERLIGHT selects so another host can build it.
- * GSC_AUTOSAVE_ADOPTS_WINDOWS: the restored library brings the windows (and
- * the rest of the Glk objects); without it they open as on a fresh start. */
-#if defined(SPATTERLIGHT)
+/* quengle: autosave and continue as spatterlight's, without its archive of the glk library. windows open as on a
+ * fresh start, the engine containers come from /autosave/scarier.sav (os_glk_quengle.cpp), the host replays the
+ * screen. GSC_AUTOSAVE: either host; GSC_AUTOSAVE_ADOPTS_WINDOWS: the restored library brings the windows */
+#if defined(SPATTERLIGHT) || defined(QUENGLE)
 # define GSC_AUTOSAVE 1
 #endif
 #ifdef SPATTERLIGHT
 # define GSC_AUTOSAVE_ADOPTS_WINDOWS 1
+#endif
+#ifdef QUENGLE
+extern "C" {
+#include "common_utils/randomness.h"
+}
+#include "platform/scarier-autosave.h"
 #endif
 
 /* Blorb resource map, for ADRIFT 5 graphics/sound (the game file is a Blorb),
@@ -392,6 +397,10 @@ extern int gsc_a5_graphics_ok;
 extern int gsc_a5_sound_ok;
 extern schanid_t gsc_a5_channels[GSC_A5_MAX_CHANNELS];
 extern glui32 gsc_a5_chan_sound[GSC_A5_MAX_CHANNELS];
+#ifdef QUENGLE
+/* os_glk_quengle.cpp: whether each channel's sound loops, so a continue restarts it the same way */
+extern int gsc_a5_chan_loop[GSC_A5_MAX_CHANNELS];
+#endif
 extern void gsc_a5_put_string (const char *string);
 extern void gsc_a5_main (void);
 

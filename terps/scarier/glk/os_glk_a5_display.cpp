@@ -677,6 +677,9 @@ gsc_a5_sound_event (const a5_media_event_t *m)
                                  (glui32) m->number,
                                  m->loop ? 0xffffffffu : 1, (glui32) ch);
           gsc_a5_chan_sound[ch] = (glui32) m->number;
+#ifdef QUENGLE
+          gsc_a5_chan_loop[ch] = m->loop ? 1 : 0;
+#endif
         }
     }
 }
