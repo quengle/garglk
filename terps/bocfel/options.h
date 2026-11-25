@@ -58,7 +58,7 @@ struct Options {
     bool autosave_librarystate = true; // quengle: our remglk-rs patch implements the glkunix library-state hooks
     bool persistent_transcript = false;
     std::optional<std::string> editor = std::nullopt;
-    bool warn_on_v6 = true;
+    bool warn_on_v6 = false; // quengle
     bool redirect_v6_windows = true;
     bool disable_v6_hacks = false;
     double v6_hack_max_scale = 4.0;
