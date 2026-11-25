@@ -302,7 +302,7 @@ gsc_a5_display_t::waitkey ()
   if (gsc_a5_run)
     gsc_a5_status (gsc_a5_run);
   gsc_map_redraw ();
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* Save the game at the pause: after the panes are brought up to
      date (so the GUI snapshot has them) and before the key is asked
      for (so the archived windows carry no pending request).  Not

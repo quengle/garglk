@@ -33,7 +33,7 @@
 
 #include "os_glk_internal.h"
 
-#if defined (SPATTERLIGHT)
+#ifdef GSC_AUTOSAVE
 /*
  * gsc_autorestore_wanted()
  *
@@ -599,7 +599,7 @@ os_open_file (scr_bool is_save)
   usage = fileusage_SavedGame | fileusage_BinaryMode;
   fmode = is_save ? filemode_Write : filemode_Read;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   gsc_sc_note_mid_turn_input ();
 #endif
   fileref = glk_fileref_create_by_prompt (usage, fmode, 0);
@@ -1339,7 +1339,7 @@ gsc_main_startup_notes (void)
 }
 
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 /*
  * gsc_main_autorestore()
  *
@@ -1483,7 +1483,7 @@ gsc_main (void)
   scr_bool is_running;
   int autorestore = FALSE;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* A failed game load has no state to restore onto, and needs a window to
      report itself in -- take the normal path and print the complaint. */
   autorestore = gsc_game != nullptr && gsc_autorestore_wanted ();
@@ -1515,7 +1515,7 @@ gsc_main (void)
   if (!autorestore)
     gsc_main_startup_notes ();
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   if (autorestore)
     gsc_main_autorestore ();
 #endif
@@ -1539,7 +1539,7 @@ gsc_main (void)
       /* Each (re)start replays the intro, so allow the title window again
          -- except on the autorestore pass, whose title-window state was
          just recovered from the archive. */
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
       if (!gsc_autorestored)
 #endif
         gsc_seen_input = FALSE;

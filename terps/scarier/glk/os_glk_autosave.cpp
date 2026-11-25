@@ -26,7 +26,7 @@
 
 #include "os_glk_internal.h"
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 /*---------------------------------------------------------------------*/
 /*  Spatterlight autosave/autorestore support                          */
 /*                                                                     */
@@ -892,4 +892,4 @@ gsc_autosave (void)
     scarier_autosave_write (state);
 }
 
-#endif /* SPATTERLIGHT */
+#endif /* GSC_AUTOSAVE */

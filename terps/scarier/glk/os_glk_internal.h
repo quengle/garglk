@@ -80,6 +80,12 @@ extern "C" {
 #include "platform/scarier-autosave.h"
 #endif
 
+/* GSC_AUTOSAVE: the autosave/autorestore code, kept apart from the rest of
+ * what SPATTERLIGHT selects so another host can build it. */
+#if defined(SPATTERLIGHT)
+# define GSC_AUTOSAVE 1
+#endif
+
 /* Blorb resource map, for ADRIFT 5 graphics/sound (the game file is a Blorb),
  * and for Gargoyle's file resources. */
 extern "C" {
@@ -270,7 +276,7 @@ extern void gsc_event_wait_2 (glui32 wait_type_1, glui32 wait_type_2,
                               event_t *event);
 extern void gsc_event_wait (glui32 wait_type, event_t *event);
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 extern int gsc_autorestored;
 extern int gsc_in_debug_read;
 extern int gsc_autorestore_wanted (void);
@@ -397,7 +403,9 @@ extern void gsc_a5_status (a5_run_t *run);
 #ifdef SPATTERLIGHT
 /* os_glk_resources.cpp: load a media file from beside the game. */
 extern glui32 gsc_load_external_resource (const char *filepath, int is_sound);
+#endif
 
+#ifdef GSC_AUTOSAVE
 /* os_glk_autosave.cpp: Spatterlight autosave and autorestore. */
 extern void gsc_autosave (void);
 extern void gsc_a5_note_turn_start (void);
