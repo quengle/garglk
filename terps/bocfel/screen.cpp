@@ -5652,6 +5652,44 @@ void screen_load_scale_info()
 #endif
 
 #ifdef ZTERP_GLK_GRAPHICS
+#ifndef ZTERP_GLK_OVERLAY
+// quengle: bocfel 2.5.1's table, in the same banner-image coordinates arthur_image_pos() produces
+static std::optional<ImageGeometry> arthur_fixed_geom(glui32 pic)
+{
+    switch (pic) {
+    case 4:   case 7:   case 10:  case 11:  case 12:  case 13:  case 14:  case 15:
+    case 16:  case 18:  case 19:  case 20:  case 21:  case 22:  case 23:  case 24:
+    case 25:  case 26:  case 27:  case 28:  case 29:  case 30:  case 31:  case 32:
+    case 33:  case 34:  case 35:  case 36:  case 37:  case 38:  case 39:  case 40:
+    case 41:  case 42:  case 43:  case 44:  case 45:  case 46:  case 47:  case 48:
+    case 49:  case 50:  case 51:  case 52:  case 53:  case 55:  case 56:  case 57:
+    case 58:  case 59:  case 60:  case 61:  case 62:  case 63:  case 64:  case 65:
+    case 66:  case 67:  case 68:  case 69:  case 70:  case 71:  case 72:  case 73:
+    case 74:  case 75:  case 76:  case 77:  case 78:  case 81:  case 86:  case 89:
+    case 101: case 102: case 154: case 157: case 162: case 165: case 166: case 167:
+        return ImageGeometry(92, 7);
+    case 6:   return ImageGeometry(131, 54); // sword in stone
+    case 9:   return ImageGeometry(168, 51); // sword in stone (behind gravestone)
+    case 17:  return ImageGeometry(67, 6);   // parade area
+    case 80:  return ImageGeometry(39, 26);  // key on necklace (woman)
+    case 83:  return ImageGeometry(41, 23);  // key on necklace (demon)
+    case 88:  return ImageGeometry(121, 17); // boar (from south)
+    case 91:  return ImageGeometry(134, 34); // boar (from north, startled)
+    case 93:  return ImageGeometry(127, 22); // boar (charging)
+    case 95:  return ImageGeometry(141, 46); // gold egg
+    case 97:  return ImageGeometry(173, 31); // leprechaun
+    case 99:  return ImageGeometry(176, 28); // leprechaun (bottle)
+    case 104: return ImageGeometry(126, 33); // boar (from north)
+    case 156: return ImageGeometry(45, 28);  // gauntlet (in chamber)
+    case 158: return ImageGeometry(81, 13);  // tower door
+    case 161: return ImageGeometry(64, 35);  // gauntlet (through window)
+    case 163: return ImageGeometry(48, 6);   // flying
+    case 169: return ImageGeometry(9, 8);    // boar (dead)
+    }
+    return std::nullopt;
+}
+#endif
+
 static std::optional<ImageGeometry> arthur_geom(glui32 pic, int x, int y)
 {
     switch (pic) {
@@ -5677,6 +5715,15 @@ static std::optional<ImageGeometry> arthur_geom(glui32 pic, int x, int y)
     // Stamps (placed by RT-UPDATE-PICT-WINDOW using invisible pictures).
     case 6:  case 9:  case 80:  case 83:  case 88:  case 91:  case 93: case 95:
     case 97: case 99: case 104: case 156: case 158: case 161: case 169:
+#ifndef ZTERP_GLK_OVERLAY
+        // quengle: without gargoyle's overlays the game measures window 2 wrong and centers rooms and stamps
+        // at negative (wrapped) coordinates. use the fixed positions bocfel 2.5.1 had for those
+        if (as_signed(x) < 1 || as_signed(y) < 1) {
+            if (auto fixed = arthur_fixed_geom(pic); fixed.has_value()) {
+                return fixed;
+            }
+        }
+#endif
         return arthur_image_pos(x, y, ARTHUR_BANNER_IMAGE_X, ARTHUR_BANNER_IMAGE_Y);
 
     // All map images (106-149) except the map background itself (137).
