@@ -202,6 +202,9 @@ extern struct Command *CurrentCommand;
 extern strid_t Transcript;
 extern glui32 TopWidth, TopHeight;
 extern int JustStarted;
+#ifdef QUENGLE
+void QuengleAutosave(void);
+#endif
 extern int should_restart;
 
 GLK_ATTRIBUTE_NORETURN void CleanupAndExit(void);

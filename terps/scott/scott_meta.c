@@ -169,6 +169,32 @@ void LoadGame(void)
     should_look_in_transcript = 1;
 }
 
+#ifdef QUENGLE
+/* quengle: autosave, in the save file's own format. written at each line input (parser.c), read once at startup
+   (scott.c). the screen comes back from the host's replay (host.js) */
+static strid_t QuengleAutosaveStream(glui32 mode)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_TextMode,
+        "/autosave/scott.sav", 0);
+    strid_t s = NULL;
+    if (fref == NULL)
+        return NULL;
+    if (mode == filemode_Write || glk_fileref_does_file_exist(fref))
+        s = glk_stream_open_file(fref, mode, 0);
+    glk_fileref_destroy(fref);
+    return s;
+}
+
+void QuengleAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Write);
+    if (file == NULL)
+        return;
+    WriteSavedGame(file);
+    glk_stream_close(file, NULL);
+}
+#endif
+
 void RestartGame(void)
 {
     if (CurrentCommand)
