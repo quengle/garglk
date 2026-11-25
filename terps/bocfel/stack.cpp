@@ -1233,7 +1233,8 @@ static bool restore_quetzal(const std::shared_ptr<IO> &savefile, SaveType savety
             // the save file) unless this is disabled by the -H option.
             // We always redisplay after an autosave, unless we’re doing
             // a library-state autosave, in which case we don’t need to.
-            if (savetype == SaveType::Autosave || !options.disable_history_playback) {
+            // quengle: not for glk-state autosaves: the host puts the window text back itself
+            if (savetype == SaveType::Autosave || (savetype != SaveType::AutosaveLib && !options.disable_history_playback)) {
                 try {
                     long start = iff->io()->tell();
 
