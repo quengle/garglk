@@ -1047,7 +1047,12 @@ std::optional<std::string> zterp_os_rcfile(bool)
 #ifndef have_zterp_os_autosave_name
 std::optional<std::string> zterp_os_autosave_name()
 {
+#ifdef __EMSCRIPTEN__
+    // quengle: emglken has no OS section and no filesystem; the path goes straight to its Dialog
+    return "/autosave/" + get_story_id();
+#else
     return std::nullopt;
+#endif
 }
 #endif
 
