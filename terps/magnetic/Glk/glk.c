@@ -644,6 +644,10 @@ static int gms_graphics_pixel = 2;
 
 /* Proportion of the display to use for graphics. */
 static glui32 gms_graphics_proportion = 60;
+#ifdef QUENGLE
+/* the share quengle_graphics_draw last gave the graphics window; 0 for a fresh window (gms_graphics_proportion) */
+static glui32 quengle_proportion = 0;
+#endif
 
 /* Height, in pixels, of the graphics window. Takes precendence over
  * gms_graphics_pixel. If 0, ignore.
@@ -728,6 +732,9 @@ gms_graphics_open (void)
 {
   if (!gms_graphics_window)
     {
+#ifdef QUENGLE
+      quengle_proportion = 0;
+#endif
       if (gms_graphics_height_pixels > 0)
         {
           gms_graphics_window = glk_window_open (gms_main_window,
@@ -1254,8 +1261,14 @@ gms_graphics_clear_and_border (winid_t glk_window, int x_offset, int y_offset,
    * Set the graphics window background to match the main window background,
    * as best as we can tell, and clear the window.
    */
+#ifndef QUENGLE
   glk_window_set_background_color (glk_window, background);
+#endif
   glk_window_clear (glk_window);
+#ifdef QUENGLE
+  /* quengle: no border or shading: they're sized for glk.c's whole-pixel scaling, not the fitted image */
+  return;
+#endif
 
   /*
    * For very small pictures, just border them, but don't try and do any
@@ -1867,6 +1880,189 @@ gms_graphics_paint_everything (winid_t glk_window, glui32 palette[],
 }
 #endif
 
+#ifdef QUENGLE
+/* quengle: pictures go to the display whole, as a png image drawn scaled into the graphics window, in place of
+   glk.c's region painting (thousands of fill rects, 256 per 50 ms tick: the picture visibly built up over seconds).
+   the png is indexed, uncompressed (stored deflate blocks): small pictures, and no zlib in the build */
+glui32 quengle_add_image (const unsigned char *buf, glui32 len);
+
+/* the picture last asked for, kept in emu.c's autosave so a continue can show it again */
+type32 quengle_picture = 0;
+type8 quengle_picture_mode = 0;
+static int quengle_continued = FALSE;
+
+static glui32
+quengle_crc (const unsigned char *p, size_t n)
+{
+  static glui32 table[256];
+  glui32 crc = 0xffffffffu;
+  size_t i;
+  if (!table[1])
+    for (i = 0; i < 256; i++)
+      {
+        glui32 c = (glui32) i;
+        int k;
+        for (k = 0; k < 8; k++)
+          c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
+        table[i] = c;
+      }
+  for (i = 0; i < n; i++)
+    crc = table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
+  return ~crc;
+}
+
+static unsigned char *
+quengle_put32be (unsigned char *p, glui32 v)
+{
+  p[0] = (unsigned char) (v >> 24);
+  p[1] = (unsigned char) (v >> 16);
+  p[2] = (unsigned char) (v >> 8);
+  p[3] = (unsigned char) v;
+  return p + 4;
+}
+
+static unsigned char *
+quengle_png (const type8 pixels[], int width, int height, const glui32 palette[], glui32 *out_len)
+{
+  glui32 raw = (glui32) height * (glui32) (width + 1);   /* a filter byte per row */
+  glui32 blocks = (raw + 65534) / 65535;
+  glui32 idat = 2 + raw + 5 * blocks + 4;
+  glui32 size = 8 + (12 + 13) + (12 + GMS_PALETTE_SIZE * 3) + (12 + idat) + 12;
+  glui32 a = 1, b = 0, left, i;
+  unsigned char *png, *p, *c;
+  int x = -1, y = 0;
+
+  if (raw == 0 || !(png = malloc (size)))
+    return NULL;
+  p = png;
+  memcpy (p, "\x89PNG\r\n\x1a\n", 8);
+  p += 8;
+
+  p = quengle_put32be (p, 13);
+  c = p;
+  memcpy (p, "IHDR", 4);
+  p = quengle_put32be (p + 4, (glui32) width);
+  p = quengle_put32be (p, (glui32) height);
+  *p++ = 8;  /* bit depth */
+  *p++ = 3;  /* indexed */
+  *p++ = 0;
+  *p++ = 0;
+  *p++ = 0;
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, GMS_PALETTE_SIZE * 3);
+  c = p;
+  memcpy (p, "PLTE", 4);
+  p += 4;
+  for (i = 0; i < GMS_PALETTE_SIZE; i++)
+    {
+      *p++ = (unsigned char) (palette[i] >> 16);
+      *p++ = (unsigned char) (palette[i] >> 8);
+      *p++ = (unsigned char) palette[i];
+    }
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, idat);
+  c = p;
+  memcpy (p, "IDAT", 4);
+  p += 4;
+  *p++ = 0x78;
+  *p++ = 0x01;
+  for (left = raw; left > 0;)
+    {
+      glui32 n = left < 65535 ? left : 65535;
+      left -= n;
+      *p++ = left ? 0 : 1;
+      *p++ = (unsigned char) n;
+      *p++ = (unsigned char) (n >> 8);
+      *p++ = (unsigned char) ~n;
+      *p++ = (unsigned char) (~n >> 8);
+      while (n--)
+        {
+          unsigned char v = x < 0 ? 0 : (unsigned char) pixels[y * width + x];
+          if (++x == width)
+            {
+              x = -1;
+              y++;
+            }
+          *p++ = v;
+          a = (a + v) % 65521;
+          b = (b + a) % 65521;
+        }
+    }
+  p = quengle_put32be (p, (b << 16) | a);
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, 0);
+  c = p;
+  memcpy (p, "IEND", 4);
+  p = quengle_put32be (p + 4, quengle_crc (c, 4));
+
+  *out_len = (glui32) (p - png);
+  return png;
+}
+
+/* at most glk.c's own 2x, and no more than this share of the screen's height: the rest is the story's */
+#define QUENGLE_MAX_SCALE 2.0
+#define QUENGLE_MAX_SHARE 40
+
+/* fresh: a new picture (else a repaint after a resize, same image). scaled to fit, centered; the window is then
+   resized to the picture (glk.c keeps it at 60% whatever the picture) */
+static void
+quengle_graphics_draw (const type8 off_screen[], const glui32 palette[], int fresh)
+{
+  static glui32 image = 0;
+  glui32 window_width, window_height, total, wanted;
+  double scale;
+  int width, height;
+
+  if (fresh || !image)
+    {
+      glui32 len;
+      unsigned char *png = quengle_png (off_screen, gms_graphics_width, gms_graphics_height, palette, &len);
+      if (!png)
+        return;
+      image = quengle_add_image (png, len);
+      free (png);
+    }
+  if (!image)
+    return;
+
+  glk_window_get_size (gms_graphics_window, &window_width, &window_height);
+  if (!quengle_proportion)
+    quengle_proportion = gms_graphics_proportion;
+  /* buffer windows measure in characters, so the screen's height comes from the share we're at */
+  total = window_height * 100 / quengle_proportion;
+  scale = (double) window_width / gms_graphics_width;
+  if (scale > QUENGLE_MAX_SCALE)
+    scale = QUENGLE_MAX_SCALE;
+  if ((double) total * QUENGLE_MAX_SHARE / 100 / gms_graphics_height < scale)
+    scale = (double) total * QUENGLE_MAX_SHARE / 100 / gms_graphics_height;
+  if (total > 0)
+    {
+      wanted = (glui32) ((gms_graphics_height * scale * 100 + total - 1) / total);
+      if (wanted < 1)
+        wanted = 1;
+      if (wanted != quengle_proportion)
+        {
+          /* remglk sends no arrange event for our own change; it has the new size right away */
+          quengle_proportion = wanted;
+          glk_window_set_arrangement (glk_window_get_parent (gms_graphics_window),
+                                      winmethod_Above | winmethod_Proportional, quengle_proportion, gms_graphics_window);
+          glk_window_get_size (gms_graphics_window, &window_width, &window_height);
+        }
+    }
+  if ((double) window_height / gms_graphics_height < scale)
+    scale = (double) window_height / gms_graphics_height;
+  width = (int) (gms_graphics_width * scale);
+  height = (int) (gms_graphics_height * scale);
+  if (width > 0 && height > 0)
+    glk_image_draw_scaled (gms_graphics_window, image,
+                           ((int) window_width - width) / 2, ((int) window_height - height) / 2, width, height);
+}
+#endif
+
+
 /*
  * gms_graphics_timeout()
  *
@@ -1912,6 +2108,9 @@ gms_graphics_timeout (void)
   if (!gms_graphics_active)
     return;
   assert (gms_graphics_window);
+#ifdef QUENGLE
+  int fresh = gms_graphics_new_picture;
+#endif
 
   /*
    * On detecting a repaint request, note the flag in a local static variable,
@@ -2062,7 +2261,9 @@ gms_graphics_timeout (void)
       deferred_repaint = FALSE;
     }
 
-#ifndef GARGLK
+#if defined (QUENGLE)
+  quengle_graphics_draw (off_screen, palette, fresh);
+#elif !defined (GARGLK)
   /*
    * Make a portion of an image pass, from lower to higher image layers,
    * scanning for invalidated pixels that are in the current image layer we
@@ -2168,7 +2369,12 @@ gms_graphics_timeout (void)
    * If animated, and if animations are enabled, handle further animation
    * frames, if any.
    */
+#ifdef QUENGLE
+  /* quengle: first frame only for now; every further frame would be one more image kept by remglk and the display */
+  if (FALSE)
+#else
   if (gms_animation_enabled && gms_graphics_animated)
+#endif
     {
       int more_animation;
 
@@ -2275,6 +2481,10 @@ ms_showpic (type32 picture, type8 mode)
   static glui32 current_crc = 0;  /* CRC of the current picture */
 
   type8 *bitmap, animated;
+#ifdef QUENGLE
+  quengle_picture = picture;
+  quengle_picture_mode = mode;
+#endif
   type16 width, height, palette[GMS_PALETTE_SIZE];
   long picture_bytes;
   glui32 crc;
@@ -5254,6 +5464,32 @@ static void
 gms_buffer_input (void)
 {
   event_t event;
+#ifdef QUENGLE
+  /* quengle: magnetic windows games start with pictures off (their own menu turned them on), so a fresh start
+     quietly types the game's GRAPHICS command first. its reply (a blank line, a second prompt) is cut from the
+     buffered output before anything shows. the game keeps the setting in its memory: saves and continues have it,
+     and a player who types GRAPHICS again turns pictures off */
+  static int quengle_fed = FALSE;
+  static long quengle_mark = -1;
+
+  if (quengle_mark >= 0)
+    {
+      if (gms_output_length > quengle_mark)
+        gms_output_length = quengle_mark;
+      quengle_mark = -1;
+    }
+  if (!quengle_fed)
+    {
+      quengle_fed = TRUE;
+      if (!quengle_continued && ms_is_magwin ())
+        {
+          strcpy (gms_input_buffer, "graphics\n");
+          gms_input_length = strlen (gms_input_buffer);
+          quengle_mark = gms_output_length;
+          return;
+        }
+    }
+#endif
 
   /*
    * Update the current status line display, and flush any pending buffered
@@ -5463,6 +5699,16 @@ ms_getchar (type8 trans)
 }
 
 
+#ifdef QUENGLE
+/* for emu.c's autosave: TRUE while a typed line is still being handed out a character at a time */
+int
+quengle_input_pending (void)
+{
+  return gms_input_cursor < gms_input_length;
+}
+#endif
+
+
 /*
  * gms_confirm()
  *
@@ -5558,6 +5804,24 @@ static const type8 GMS_FILE_SUCCESS = 0,
  *
  * Save the current game state to a file, and load a game state.
  */
+#ifdef QUENGLE
+/* quengle: a name the game asked for (pre-v4 games prompt in their own text) is a save in the player's saves
+   folder, not a file next to the game: the host maps /quengle/save/ onto it. path separators can't escape it */
+static const char *
+quengle_save_path (const type8s * name)
+{
+  static char path[256];
+  int i, n = snprintf (path, sizeof path, "/quengle/save/%s", (const char *) name);
+  for (i = (int) sizeof "/quengle/save/" - 1; i < n && path[i]; i++)
+    if (path[i] == '/' || path[i] == '\\')
+      path[i] = '_';
+  return path;
+}
+#define GMS_SAVE_NAME(name) quengle_save_path (name)
+#else
+#define GMS_SAVE_NAME(name) ((const char *) (name))
+#endif
+
 type8
 ms_save_file (type8s * name, type8 * ptr, type16 size)
 {
@@ -5599,7 +5863,7 @@ ms_save_file (type8s * name, type8 * ptr, type16 size)
        * If openable for read, assume the file already exists and confirm
        * overwrite.
        */
-      stream = fopen (name, "r");
+      stream = fopen (GMS_SAVE_NAME (name), "r");
       if (stream)
         {
           fclose (stream);
@@ -5614,7 +5878,7 @@ ms_save_file (type8s * name, type8 * ptr, type16 size)
         }
 
       /* Open output file directly.  There's no Glk way to achieve this. */
-      stream = fopen (name, "wb");
+      stream = fopen (GMS_SAVE_NAME (name), "wb");
       if (!stream)
         return GMS_FILE_ERROR;
 
@@ -5682,7 +5946,7 @@ ms_load_file (type8s * name, type8 * ptr, type16 size)
        * Open the input file directly.  As above, there's no Glk way to
        * achieve this.
        */
-      stream = fopen (name, "rb");
+      stream = fopen (GMS_SAVE_NAME (name), "rb");
       if (!stream)
         return GMS_FILE_ERROR;
 
@@ -6129,11 +6393,23 @@ gms_main (void)
   /* Try to identify the game from its text file header. */
   gms_gameid_identify_game (text_file);
 
+#ifdef QUENGLE
+  /* quengle: continue from the autosave (emu.c); the host replays the screen, so no banner either */
+  {
+    extern type8 quengle_restore (void);
+    if ((quengle_continued = quengle_restore ()))
+      goto quengle_resumed;
+  }
+#endif
+
   /* Print out a short banner. */
   gms_header_string ("\nMagnetic Scrolls Interpreter, version 2.3\n");
   gms_banner_string ("Written by Niclas Karlsson\n"
                      "Glk interface by Simon Baldwin\n\n");
 
+#ifdef QUENGLE
+quengle_resumed:
+#endif
   /* Look for failure to load just game graphics. */
   if (gms_graphics_possible && ms_init_status == 1)
     {
@@ -6146,6 +6422,12 @@ gms_main (void)
 
       gms_graphics_possible = FALSE;
     }
+
+#ifdef QUENGLE
+  /* the picture up when the autosave was taken: the replayed screen's copy names an image this run doesn't have */
+  if (quengle_continued && quengle_picture_mode && gms_graphics_possible)
+    ms_showpic (quengle_picture, quengle_picture_mode);
+#endif
 
   /* Run the game opcodes -- ms_rungame() returns FALSE on game end. */
   do

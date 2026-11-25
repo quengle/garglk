@@ -34,6 +34,9 @@
 
 #include "a5run_internal.h"
 
+#include <string>
+#include <unordered_set>
+
 #include "../../sessrec.h"
 
 /* ============================================================ save / restore */
@@ -217,7 +220,13 @@ intern_key (const a5_adventure_t *adv, const char *key)
   for (i = 0; i < adv->n_groups; i++)
     if (streq (adv->groups[i].key, key))
       return adv->groups[i].key;
-  return nullptr;
+  /* a key the model doesn't have: an author's dangling reference (lost coastlines puts statics "AtLocation"
+     Scant, a location it never defines). play keeps the raw string; dropping it here changed the state a restore
+     gave back. keep it, in storage that outlives the run (keys are compared by content) */
+  {
+    static std::unordered_set<std::string> strays;
+    return strays.insert (key).first->c_str ();
+  }
 }
 
 /* ---------------------------------------------------------- Scarier body ----
@@ -998,6 +1007,14 @@ a5run_save (a5_run_t *run, size_t *out_len)
 {
   return a5run_save_blob (run, out_len, 0);
 }
+
+#ifdef QUENGLE
+char *
+a5run_save_lean (a5_run_t *run, size_t *out_len)
+{
+  return a5run_save_blob (run, out_len, 1);
+}
+#endif
 
 /* strtol on a child's text (0 when absent). */
 static long

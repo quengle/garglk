@@ -80,6 +80,22 @@ extern "C" {
 #include "platform/scarier-autosave.h"
 #endif
 
+/* quengle: autosave and continue as spatterlight's, without its archive of the glk library. windows open as on a
+ * fresh start, the engine containers come from /autosave/scarier.sav (os_glk_quengle.cpp), the host replays the
+ * screen. GSC_AUTOSAVE: either host; GSC_AUTOSAVE_ADOPTS_WINDOWS: the restored library brings the windows */
+#if defined(SPATTERLIGHT) || defined(QUENGLE)
+# define GSC_AUTOSAVE 1
+#endif
+#ifdef SPATTERLIGHT
+# define GSC_AUTOSAVE_ADOPTS_WINDOWS 1
+#endif
+#ifdef QUENGLE
+extern "C" {
+#include "common_utils/randomness.h"
+}
+#include "platform/scarier-autosave.h"
+#endif
+
 /* Blorb resource map, for ADRIFT 5 graphics/sound (the game file is a Blorb),
  * and for Gargoyle's file resources. */
 extern "C" {
@@ -270,7 +286,7 @@ extern void gsc_event_wait_2 (glui32 wait_type_1, glui32 wait_type_2,
                               event_t *event);
 extern void gsc_event_wait (glui32 wait_type, event_t *event);
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 extern int gsc_autorestored;
 extern int gsc_in_debug_read;
 extern int gsc_autorestore_wanted (void);
@@ -381,6 +397,15 @@ extern int gsc_a5_graphics_ok;
 extern int gsc_a5_sound_ok;
 extern schanid_t gsc_a5_channels[GSC_A5_MAX_CHANNELS];
 extern glui32 gsc_a5_chan_sound[GSC_A5_MAX_CHANNELS];
+#ifdef QUENGLE
+#include <vector>
+/* os_glk_quengle.cpp: undo snapshots stored as line diffs against the next newer state. encode falls back to the
+ * whole target when its diff doesn't decode back to it exactly; decode takes either form */
+extern std::string quengle_diff_encode (const std::string &base, const std::string &target);
+extern bool quengle_diff_decode (const std::string &base, const std::string &stored, std::string *target);
+/* os_glk_quengle.cpp: whether each channel's sound loops, so a continue restarts it the same way */
+extern int gsc_a5_chan_loop[GSC_A5_MAX_CHANNELS];
+#endif
 extern void gsc_a5_put_string (const char *string);
 extern void gsc_a5_main (void);
 
@@ -397,7 +422,9 @@ extern void gsc_a5_status (a5_run_t *run);
 #ifdef SPATTERLIGHT
 /* os_glk_resources.cpp: load a media file from beside the game. */
 extern glui32 gsc_load_external_resource (const char *filepath, int is_sound);
+#endif
 
+#ifdef GSC_AUTOSAVE
 /* os_glk_autosave.cpp: Spatterlight autosave and autorestore. */
 extern void gsc_autosave (void);
 extern void gsc_a5_note_turn_start (void);

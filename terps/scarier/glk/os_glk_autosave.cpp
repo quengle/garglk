@@ -26,7 +26,7 @@
 
 #include "os_glk_internal.h"
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 /*---------------------------------------------------------------------*/
 /*  Spatterlight autosave/autorestore support                          */
 /*                                                                     */
@@ -323,7 +323,12 @@ static std::string
 gsc_a5_serialize_all (void)
 {
   size_t length = 0;
+#ifdef QUENGLE
+  /* lean: no runner-interop body (87% of a full save), as the undo stack */
+  char *blob = a5run_save_lean (gsc_a5_run, &length);
+#else
   char *blob = a5run_save (gsc_a5_run, &length);
+#endif
   const char *text;
   size_t text_length;
   int depth, i;
@@ -333,6 +338,24 @@ gsc_a5_serialize_all (void)
 
   std::string out = GSC_A5_CONTAINER_MAGIC;
   gsc_container_put_chunk (out, blob, length);
+#ifdef QUENGLE
+  /* each undo snapshot as a line diff against the next newer state, the newest against this one */
+  std::string newer (blob, length);
+  std::vector<std::string> undo_chunks;
+
+  undo_chunks.resize ((size_t) a5run_undo_depth (gsc_a5_run));
+  for (i = (int) undo_chunks.size () - 1; i >= 0; i--)
+    {
+      const char *turn_text;
+      size_t blob_length = 0, turn_length = 0;
+      const char *undo_blob = a5run_undo_peek (gsc_a5_run, i, &blob_length,
+                                               &turn_text, &turn_length);
+      std::string older (undo_blob, blob_length);
+
+      undo_chunks[(size_t) i] = quengle_diff_encode (newer, older);
+      newer.swap (older);
+    }
+#endif
   free (blob);
 
   a5run_get_turn_text (gsc_a5_run, &text, &text_length);
@@ -348,7 +371,12 @@ gsc_a5_serialize_all (void)
       const char *undo_blob = a5run_undo_peek (gsc_a5_run, i, &blob_length,
                                                &turn_text, &turn_length);
 
+#ifdef QUENGLE
+      (void) undo_blob;
+      gsc_container_put_chunk (out, undo_chunks[(size_t) i].data (), undo_chunks[(size_t) i].size ());
+#else
       gsc_container_put_chunk (out, undo_blob, blob_length);
+#endif
       gsc_container_put_chunk (out, turn_text, turn_length);
     }
 
@@ -384,6 +412,9 @@ gsc_a5_apply_all (const std::string &data)
     return false;
   if (!a5run_restore (gsc_a5_run, chunk.data (), chunk.size ()))
     return false;
+#ifdef QUENGLE
+  const std::string state = chunk;
+#endif
 
   /* As on the scare side, a truncated undo tail is not fatal. */
   if (!gsc_container_get_chunk (data, &pos, &chunk))
@@ -392,6 +423,39 @@ gsc_a5_apply_all (const std::string &data)
 
   if (!gsc_container_get_count (data, &pos, &depth))
     return true;
+#ifdef QUENGLE
+  {
+    /* the diffs chain from the newest: read them all, rebuild newest first, push oldest first */
+    std::vector<std::string> blobs, texts;
+
+    for (i = 0; i < depth; i++)
+      {
+        if (!gsc_container_get_chunk (data, &pos, &chunk)
+            || !gsc_container_get_chunk (data, &pos, &turn_chunk))
+          return true;
+        blobs.push_back (chunk);
+        texts.push_back (turn_chunk);
+      }
+    const std::string *newer = &state;
+    for (i = depth - 1; i >= 0; i--)
+      {
+        std::string older;
+
+        if (!quengle_diff_decode (*newer, blobs[(size_t) i], &older))
+          {
+            /* a broken link loses this snapshot and every older one: undo stops short, the game is fine */
+            blobs.erase (blobs.begin (), blobs.begin () + i + 1);
+            texts.erase (texts.begin (), texts.begin () + i + 1);
+            break;
+          }
+        blobs[(size_t) i].swap (older);
+        newer = &blobs[(size_t) i];
+      }
+    for (size_t k = 0; k < blobs.size (); k++)
+      a5run_undo_push_blob (gsc_a5_run, blobs[k].data (), blobs[k].size (),
+                            texts[k].data (), texts[k].size ());
+  }
+#else
   for (i = 0; i < depth; i++)
     {
       if (!gsc_container_get_chunk (data, &pos, &chunk)
@@ -400,6 +464,7 @@ gsc_a5_apply_all (const std::string &data)
       a5run_undo_push_blob (gsc_a5_run, chunk.data (), chunk.size (),
                             turn_chunk.data (), turn_chunk.size ());
     }
+#endif
 
   /* Absent from an autosave written before the question was carried; the
      game then resumes at a fresh prompt, as it always did. */
@@ -444,6 +509,7 @@ gsc_stash_frontend_state (ScarierGlkFrontendState *st)
 {
   int ch;
 
+#ifdef SPATTERLIGHT
   st->mainwintag = gsc_main_window ? gsc_main_window->tag : 0;
   st->statuswintag = gsc_status_window ? gsc_status_window->tag : 0;
   st->sidewintag = gsc_a5_side_window ? gsc_a5_side_window->tag : 0;
@@ -469,6 +535,10 @@ gsc_stash_frontend_state (ScarierGlkFrontendState *st)
   st->map_cy = gsc_map_cam.cy;
   st->map_page = gsc_map_cam.page;
   st->colour_on = gsc_colour_enabled;
+#else
+  /* quengle: no glk objects to carry, the windows are opened afresh */
+  (void) ch;
+#endif
 
   /* Saving at a question asked partway through a turn: the generators as
      they stood when the turn began, which is where the relaunch runs it
@@ -520,6 +590,7 @@ gsc_stash_rng (ScarierGlkFrontendState *st)
 void
 gsc_recover_frontend_state (const ScarierGlkFrontendState *st)
 {
+#ifdef SPATTERLIGHT
   int ch;
 
   gsc_main_window = gli_window_for_tag (st->mainwintag);
@@ -568,6 +639,7 @@ gsc_recover_frontend_state (const ScarierGlkFrontendState *st)
   /* The restored map window holds the app's snapshot pixels, not ours:
      force the next redraw to flush the whole surface. */
   gsc_map_screen_drop ();
+#endif
 
   /* Restore the RNG to its saved position.  The silent autorestore boot
      re-seeded and may have drawn from it; this puts it back exactly where
@@ -612,8 +684,15 @@ gsc_autorestore_replace_state (bool (*apply) (const std::string &data))
   if (!restored)
     {
       scarier_autosave_discard ();
+#ifdef SPATTERLIGHT
       win_reset ();
       exit (0);
+#else
+      /* the silent boot has used up the opening: nothing sane to go on with */
+      glk_set_window (gsc_main_window);
+      gsc_normal_string ("\n[This game's autosave couldn't be read. Restart to play.]\n");
+      glk_exit ();
+#endif
     }
 }
 
@@ -892,4 +971,4 @@ gsc_autosave (void)
     scarier_autosave_write (state);
 }
 
-#endif /* SPATTERLIGHT */
+#endif /* GSC_AUTOSAVE */

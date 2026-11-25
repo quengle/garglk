@@ -1509,6 +1509,120 @@ type8 *sound_extract(type8s * name, type32 * length, type16 * tempo)
 	return 0;
 }
 
+/* quengle: autosave. the game's whole state (memory, registers, random seed, the table pointers the game sets once
+   at startup) goes to this file when the game asks for a new line of input, with pc back on the line-A instruction
+   that asked: a continue loads it right after ms_init and that instruction asks again. the screen comes back from
+   the host's replay (host.js); saving at the undo point instead would print the turn's output a second time */
+#ifdef QUENGLE
+#include "glk.h"
+#include "glkstart.h"
+static const char *quengle_autosave_path = "/autosave/magnetic.sav";
+static const char quengle_magic[8] = "QMAGSAV3";
+#define QUENGLE_NVALS 31
+extern int quengle_input_pending(void);	/* glk.c: rest of a typed line still to hand out */
+extern type32 quengle_picture;	/* glk.c: the picture showing */
+extern type8 quengle_picture_mode;
+
+static strid_t quengle_autosave_stream(glui32 mode)
+{
+	frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_BinaryMode,
+		quengle_autosave_path, 0);
+	strid_t s = NULL;
+	if (!fref) return NULL;
+	if (mode == filemode_Write || glk_fileref_does_file_exist(fref))
+		s = glk_stream_open_file(fref, mode, 0);
+	glk_fileref_destroy(fref);
+	return s;
+}
+
+static void quengle_put32(strid_t s, type32 v)
+{
+	char b[4] = { (char)(v >> 24), (char)(v >> 16), (char)(v >> 8), (char)v };
+	glk_put_buffer_stream(s, b, 4);
+}
+
+static int quengle_get32(strid_t s, type32 *v)
+{
+	unsigned char b[4];
+	if (glk_get_buffer_stream(s, (char *)b, 4) != 4) return 0;
+	*v = ((type32)b[0] << 24) | ((type32)b[1] << 16) | ((type32)b[2] << 8) | b[3];
+	return 1;
+}
+
+static void quengle_autosave(type32 at)
+{
+	type8 i;
+	strid_t s = quengle_autosave_stream(filemode_Write);
+	if (!s) return;
+	glk_put_buffer_stream(s, (char *)quengle_magic, 8);
+	quengle_put32(s, mem_size);
+	glk_put_buffer_stream(s, (char *)code, mem_size);
+	for (i = 0; i < 8; i++) quengle_put32(s, dreg[i]);
+	for (i = 0; i < 8; i++) quengle_put32(s, areg[i]);
+	quengle_put32(s, i_count);
+	quengle_put32(s, at);
+	quengle_put32(s, rseed);
+	quengle_put32(s, properties);
+	quengle_put32(s, fl_sub);
+	quengle_put32(s, fl_tab);
+	quengle_put32(s, fl_size);
+	quengle_put32(s, fp_tab);
+	quengle_put32(s, fp_size);
+	quengle_put32(s, zflag);
+	quengle_put32(s, nflag);
+	quengle_put32(s, cflag);
+	quengle_put32(s, vflag);
+	quengle_put32(s, quengle_picture);
+	quengle_put32(s, quengle_picture_mode);
+	glk_stream_close(s, NULL);
+}
+
+/* 1 when the game continues from the autosave. a file that doesn't fit this game is ignored */
+type8 quengle_restore(void)
+{
+	type8 i, ok = 0;
+	type32 size, v[QUENGLE_NVALS];
+	char magic[8];
+	type8 *mem;
+	strid_t s = quengle_autosave_stream(filemode_Read);
+	if (!s) return 0;
+	if (glk_get_buffer_stream(s, magic, 8) == 8 && memcmp(magic, quengle_magic, 8) == 0
+	    && quengle_get32(s, &size) && size == mem_size && (mem = malloc(size)))
+	{
+		if (glk_get_buffer_stream(s, (char *)mem, size) == size)
+		{
+			for (i = 0; i < QUENGLE_NVALS && quengle_get32(s, &v[i]); i++);
+			if (i == QUENGLE_NVALS)
+			{
+				memcpy(code, mem, size);
+				for (i = 0; i < 8; i++) { dreg[i] = v[i]; areg[i] = v[8 + i]; }
+				i_count = v[16];
+				pc = v[17];
+				rseed = v[18];
+				properties = (type16)v[19];
+				fl_sub = (type16)v[20];
+				fl_tab = (type16)v[21];
+				fl_size = (type16)v[22];
+				fp_tab = (type16)v[23];
+				fp_size = (type16)v[24];
+				zflag = (type8)v[25];
+				nflag = (type8)v[26];
+				cflag = (type8)v[27];
+				vflag = (type8)v[28];
+				quengle_picture = v[29];
+				quengle_picture_mode = (type8)v[30];
+				undo_stat[0] = undo_stat[1] = 0;
+				ok = 1;
+			}
+		}
+		free(mem);
+	}
+	glk_stream_close(s, NULL);
+	return ok;
+}
+#endif
+
+
 void save_undo(void)
 {
 	type8 *tmp, i;
@@ -2860,6 +2974,10 @@ void do_line_a(void)
 #endif
 	if ((byte2 < 0xdd) || (version < 4 && byte2 < 0xe4) || (version < 2 && byte2 < 0xed))
 	{
+#ifdef QUENGLE
+		if (!quengle_input_pending())
+			quengle_autosave(pc - 2);	/* read_word moved past the instruction */
+#endif
 		ms_flush();	/* flush output-buffer */
 		rand_emu();	/* Increase game randomness */
 		l1c = ms_getchar(1);	/* 0 means UNDO */
@@ -2951,6 +3069,10 @@ void do_line_a(void)
 			break;
 
 		case 4:	/* A0E1 Read from keyboard to (A1), status in D1 (0 for ok) */
+#ifdef QUENGLE
+			if (!quengle_input_pending())
+				quengle_autosave(pc - 2);
+#endif
 			ms_flush();
 			rand_emu();
 			tmp32 = read_reg(8 + 1, 2);

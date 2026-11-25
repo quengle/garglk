@@ -760,6 +760,7 @@ static void save_quetzal(IO &savefile, SaveType savetype, SaveOpcode saveopcode,
         if (!on_save_stack) {
             write_chunk(savefile, screen_write_bfhs);
             write_chunk(savefile, screen_write_bfts);
+            write_chunk(savefile, screen_write_lpal); // quengle
             write_chunk(savefile, meta_write_bfnt);
         }
 
@@ -1232,7 +1233,8 @@ static bool restore_quetzal(const std::shared_ptr<IO> &savefile, SaveType savety
             // the save file) unless this is disabled by the -H option.
             // We always redisplay after an autosave, unless we’re doing
             // a library-state autosave, in which case we don’t need to.
-            if (savetype == SaveType::Autosave || !options.disable_history_playback) {
+            // quengle: not for glk-state autosaves: the host puts the window text back itself
+            if (savetype == SaveType::Autosave || (savetype != SaveType::AutosaveLib && !options.disable_history_playback)) {
                 try {
                     long start = iff->io()->tell();
 
@@ -1252,6 +1254,10 @@ static bool restore_quetzal(const std::shared_ptr<IO> &savefile, SaveType savety
 
         if (iff->find(IFF::TypeID("Bfts"), size)) {
             screen_read_bfts(*iff->io(), size);
+        }
+
+        if (iff->find(IFF::TypeID("LPal"), size)) { // quengle
+            screen_read_lpal(*iff->io(), size);
         }
 
         if (is_bfzs && !is_bfms) {

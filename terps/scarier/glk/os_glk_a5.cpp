@@ -285,7 +285,7 @@ gsc_a5_await_line (event_t *event, char *buf, int bufsize,
                 if (a5run_is_over (gsc_a5_run))
                   return FALSE;
                 gsc_a5_put_prompt ("\n");
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
                 /* The tick changed game state while we sat at the prompt;
                    refresh the autosave (it skips itself when the
                    autosave-on-timer preference is off). */
@@ -554,7 +554,7 @@ gsc_a5_popup_answered (const std::string &answer)
 static void
 gsc_a5_popup_autosave (void)
 {
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   gsc_a5_autosave_popup ();
 #endif
 }
@@ -1345,7 +1345,7 @@ gsc_a5_main_setup (a5_run_t *&run, int autorestore)
 static void
 gsc_a5_main_opening (a5_run_t *&run, int autorestore)
 {
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* When a Spatterlight autosave exists, boot the world silently to where a
      manual RESTORE would find it (the intro's task and RNG side effects
      included, its text discarded), then replace the whole state -- engine
@@ -1360,7 +1360,9 @@ gsc_a5_main_opening (a5_run_t *&run, int autorestore)
          given so far (which gsc_a5_apply_all takes), so play the opening
          for real.  It stops at the question already on screen. */
       gsc_autorestore_replace_state (gsc_a5_apply_all);
+#ifdef SPATTERLIGHT
       gsc_a5_rebind_resources ();
+#endif
       glk_set_window (gsc_main_window);
       glk_set_style (style_Normal);
       gsc_a5_start_real_time (run);
@@ -1382,7 +1384,9 @@ gsc_a5_main_opening (a5_run_t *&run, int autorestore)
          autosave restarts in a fresh process rather than continue from a
          polluted state. */
       gsc_autorestore_replace_state (gsc_a5_apply_all);
+#ifdef SPATTERLIGHT
       gsc_a5_rebind_resources ();
+#endif
       glk_set_window (gsc_main_window);
       glk_set_style (style_Normal);
       /* Re-arm or cancel the real-time timer per the current preferences
@@ -1391,6 +1395,10 @@ gsc_a5_main_opening (a5_run_t *&run, int autorestore)
          it resumes them from its own snapshot, so none are replayed here. */
       gsc_a5_start_real_time (run);
       gsc_a5_status (run);
+#ifndef GSC_AUTOSAVE_ADOPTS_WINDOWS
+      /* no archived pane to adopt: open the map as a fresh start would */
+      gsc_map_auto_reveal ();
+#endif
       gsc_map_redraw ();
       gsc_autorestored = TRUE;
     }
@@ -1409,7 +1417,7 @@ gsc_a5_main_opening (a5_run_t *&run, int autorestore)
   /* After the intro, so the title page is not sharing the screen with a map.
      An autorestore takes the archived pane instead, whatever it was. */
   gsc_map_auto_reveal ();
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
     }
 #endif
 
@@ -1521,7 +1529,7 @@ gsc_a5_game_over (a5_run_t *&run)
 static int
 gsc_a5_next_command (char *input, int size)
 {
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   if (gsc_autorestored)
     {
       /* The restored transcript already ends with the old prompt; skip
@@ -1691,13 +1699,16 @@ gsc_a5_main (void)
      current run, including across restarts. */
   a5_run_t *&run = gsc_a5_run;
   char input[1024];
-  int autorestore = FALSE;
+  int autorestore = FALSE, adopt = FALSE;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   autorestore = gsc_autorestore_wanted ();
 #endif
+#ifdef GSC_AUTOSAVE_ADOPTS_WINDOWS
+  adopt = autorestore;
+#endif
 
-  gsc_a5_main_setup (run, autorestore);
+  gsc_a5_main_setup (run, adopt);
   gsc_a5_main_opening (run, autorestore);
 
   for (;;)

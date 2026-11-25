@@ -941,6 +941,13 @@ static void SelectSystemMessages(void)
 
 /* Detect the game format, load its database, show the title screen
    and set up the display style and windows the game wants. */
+#ifdef QUENGLE
+/* quengle: continuing from the autosave (scott_meta.c): no title screen or banner (the host replays the screen),
+   and the first turn's automatic actions already ran before the save */
+int quengle_resumed = 0;
+static int quengle_resuming = 0;
+#endif
+
 static void SetUpGame(void)
 {
     GameIDType game_type = DetectGame(game_file);
@@ -955,9 +962,18 @@ static void SetUpGame(void)
 
     ApplyForcedStyle();
 
+#ifdef QUENGLE
+    if (quengle_resuming) {
+        /* nothing shown before the game proper */
+    } else
+#endif
     if (ZXLoadingScreen != NULL && Game->type != US_VARIANT)
         DrawZXTitleImage();
 
+#ifdef QUENGLE
+    if (quengle_resuming) {
+    } else
+#endif
     if (title_screen != NULL && CurrentGame != RETURN_TO_PIRATES_ISLE) {
         if (split_screen)
             PrintTitleScreenGrid();
@@ -973,7 +989,11 @@ static void SetUpGame(void)
         TopHeight = DEFAULT_STATUS_HEIGHT;
     }
 
-    if (game_type == TI994A) {
+    if (game_type == TI994A
+#ifdef QUENGLE
+        && !quengle_resuming
+#endif
+    ) {
         Display(Bottom, "In this adventure, you may abbreviate any word \
 by typing its first %d letters, and directions by typing \
 one letter.\n\nDo you want to restore previously saved game?\n",
@@ -1004,7 +1024,11 @@ one letter.\n\nDo you want to restore previously saved game?\n",
         }
     }
 
-    if (game_type == SCOTTFREE)
+    if (game_type == SCOTTFREE
+#ifdef QUENGLE
+        && !quengle_resuming
+#endif
+    )
         Output("\
 Scott Free, A Scott Adams game driver in C.\n\
 Release 1.14, (c) 1993,1994,1995 Swansea University Computer Society.\n\
@@ -1024,6 +1048,11 @@ static void PlayTurn(void)
 
     /* Run implicit (automatic) actions — these have vocab 0 and
        fire based on random chance or game state, not player input */
+#ifdef QUENGLE
+    if (quengle_resumed) {
+        /* they ran before the autosave was taken */
+    } else
+#endif
     if (!StopTime)
         PerformActions(0, 0);
     /* Refresh the room description (skip during TAKE ALL / DROP ALL) */
@@ -1074,6 +1103,9 @@ void glk_main(void)
         Fatal("No game provided");
 
     SelectSystemMessages();
+#ifdef QUENGLE
+    quengle_resuming = QuengleHasAutosave();
+#endif
     SetUpGame();
 
     /* Not only for Spatterlight's preferences: this is also where the
@@ -1087,6 +1119,10 @@ void glk_main(void)
     set_erkyrath_random(0);
 
     InitialState = SaveCurrentState();
+#ifdef QUENGLE
+    if (quengle_resuming)
+        quengle_resumed = QuengleRestoreAutosave();
+#endif
 
     while (1) {
         glk_tick();

@@ -33,7 +33,7 @@
 
 #include "os_glk_internal.h"
 
-#if defined (SPATTERLIGHT)
+#ifdef GSC_AUTOSAVE
 /*
  * gsc_autorestore_wanted()
  *
@@ -599,7 +599,7 @@ os_open_file (scr_bool is_save)
   usage = fileusage_SavedGame | fileusage_BinaryMode;
   fmode = is_save ? filemode_Write : filemode_Read;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   gsc_sc_note_mid_turn_input ();
 #endif
   fileref = glk_fileref_create_by_prompt (usage, fmode, 0);
@@ -1339,7 +1339,7 @@ gsc_main_startup_notes (void)
 }
 
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
 /*
  * gsc_main_autorestore()
  *
@@ -1481,12 +1481,15 @@ void
 gsc_main (void)
 {
   scr_bool is_running;
-  int autorestore = FALSE;
+  int autorestore = FALSE, adopt = FALSE;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* A failed game load has no state to restore onto, and needs a window to
      report itself in -- take the normal path and print the complaint. */
   autorestore = gsc_game != nullptr && gsc_autorestore_wanted ();
+#endif
+#ifdef GSC_AUTOSAVE_ADOPTS_WINDOWS
+  adopt = autorestore;
 #endif
 
   /* Ensure Scarier internal types have the right sizes. */
@@ -1503,7 +1506,7 @@ gsc_main (void)
   /* An autorestore adopts the archived windows below instead: opening any
      here would cost the player the host's restored ones (see
      gsc_autorestore_wanted). */
-  if (!autorestore)
+  if (!adopt)
     gsc_main_open_windows ();
 
   /* Does the game define a MAP verb of its own?  If so it keeps it, and the
@@ -1515,7 +1518,7 @@ gsc_main (void)
   if (!autorestore)
     gsc_main_startup_notes ();
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   if (autorestore)
     gsc_main_autorestore ();
 #endif
@@ -1528,7 +1531,7 @@ gsc_main (void)
      described, so there is nothing to draw yet and the first prompt's redraw
      is what actually reveals it.  An autorestore keeps the archived pane
      instead, whatever it was. */
-  if (!autorestore)
+  if (!adopt)
     gsc_map_auto_reveal ();
 
   /* Repeat the game until no more restarts requested. */
@@ -1539,7 +1542,7 @@ gsc_main (void)
       /* Each (re)start replays the intro, so allow the title window again
          -- except on the autorestore pass, whose title-window state was
          just recovered from the archive. */
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
       if (!gsc_autorestored)
 #endif
         gsc_seen_input = FALSE;

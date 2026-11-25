@@ -154,13 +154,13 @@ os_read_line (scr_char *buffer, scr_int length)
 {
   scr_bool status;
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* A turn run again to reach a pause never gets as far as a prompt, unless
      the pause did not come round this time; either way that is over. */
   gsc_sc_silent = FALSE;
 #endif
   status = gsc_read_command (buffer, length);
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   if (status)
     gsc_sc_note_command (buffer);
 #endif
@@ -193,7 +193,7 @@ gsc_read_command (scr_char *buffer, scr_int length)
   gsc_map_notice_restart ();
   gsc_map_redraw ();
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   if (gsc_autorestored)
     {
       /* The restored transcript already ends with the old prompt; skip
@@ -376,12 +376,12 @@ os_read_line_debug (scr_char *buffer, scr_int length)
   gsc_output_silence_help_hints ();
   gsc_reset_glk_style ();
   gsc_put_literal ("[Scarier debug]");
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   /* A debugger prompt is mid-turn: not a state worth autosaving. */
   gsc_in_debug_read = TRUE;
 #endif
   status = os_read_line (buffer, length);
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
   gsc_in_debug_read = FALSE;
 #endif
   return status;
@@ -404,7 +404,7 @@ gsc_get_choice_key (const char *choices)
       event_t event;
 
       /* Wait for a standard key, ignoring Glk special keys. */
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
       gsc_sc_silent = FALSE;
       gsc_sc_note_mid_turn_input ();
 #endif

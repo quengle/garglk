@@ -100,10 +100,28 @@ static int ClickShelfStage = 0;        /* Sub-counter for Kayleth click-shelf je
 static void SetAnimationRate(int rate)
 {
     if (AnimationRunning != rate) {
+#ifdef QUENGLE
+        RequestAnimationTimer(rate);
+#else
         glk_request_timer_events(rate);
+#endif
         AnimationRunning = rate;
     }
 }
+
+#ifdef QUENGLE
+/* quengle: each timer event is a round trip through the web page (an update, a redraw); at 10-20 ms that was 50-100
+   a second while waiting, heavy on an ipad. ticks come at most every QUENGLE_MIN_TICK ms and run as many animation
+   steps as the original rate would have, so the speed stays */
+#define QUENGLE_MIN_TICK 40
+int QuengleAnimationSteps = 1;
+
+void RequestAnimationTimer(int rate)
+{
+    QuengleAnimationSteps = rate > 0 && rate < QUENGLE_MIN_TICK ? (QUENGLE_MIN_TICK + rate - 1) / rate : 1;
+    glk_request_timer_events(rate * QuengleAnimationSteps);
+}
+#endif
 
 static void StopAnimations(void)
 {

@@ -129,6 +129,11 @@ extern void                    a5run_media_note_shown (a5_run_t *run, int i);
    treat a 0 return as fatal for the session).  The buffer is the v5 save body;
    the Glk/Spatterlight layer may compress/wrap it. */
 extern char *a5run_save    (a5_run_t *run, size_t *out_len);
+#ifdef QUENGLE
+/* quengle: the lean form the undo stack keeps (no runner-interop body; restores the same through <ScarierExt>),
+   for the autosave written every turn */
+extern char *a5run_save_lean (a5_run_t *run, size_t *out_len);
+#endif
 extern int   a5run_restore (a5_run_t *run, const char *data, size_t len);
 
 /* Multi-level undo (a snapshot stack built on save/restore; the depth matches

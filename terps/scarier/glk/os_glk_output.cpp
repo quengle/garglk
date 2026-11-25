@@ -1081,7 +1081,7 @@ gsc_handle_waitkey_tag (void)
   if (!gsc_readlog_stream)
     {
       strid_t stream;
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
       scr_bool resumed = FALSE;
 
       /* Running the turn again after a relaunch: go by the pauses the
@@ -1110,7 +1110,7 @@ gsc_handle_waitkey_tag (void)
       gsc_map_redraw ();
       glk_stream_set_current (stream);
 
-#ifdef SPATTERLIGHT
+#ifdef GSC_AUTOSAVE
       /* Before the request, as at a prompt: the archived window then
          has none pending and the relaunch asks for the key itself. */
       if (!resumed)

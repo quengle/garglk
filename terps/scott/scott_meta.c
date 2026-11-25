@@ -46,17 +46,12 @@ static strid_t OpenPromptedStream(glui32 usage, glui32 mode, int unicode,
     return file;
 }
 
-/* Save the current game state to a file via Glk file prompts.
-   Writes counters, room flags, bit flags, location, and item positions. */
-void SaveGame(void)
+/* Write the current game state to an open stream: counters, room flags,
+   bit flags, location, and item positions. */
+static void WriteSavedGame(strid_t file)
 {
     int ct;
     char buf[128];
-
-    strid_t file = OpenPromptedStream(fileusage_TextMode | fileusage_SavedGame,
-        filemode_Write, 0, NULL);
-    if (file == NULL)
-        return;
 
     SavedState *s = SaveCurrentState();
 
@@ -75,6 +70,17 @@ void SaveGame(void)
     }
 
     FreeSavedState(s);
+}
+
+/* Save the current game state to a file via Glk file prompts. */
+void SaveGame(void)
+{
+    strid_t file = OpenPromptedStream(fileusage_TextMode | fileusage_SavedGame,
+        filemode_Write, 0, NULL);
+    if (file == NULL)
+        return;
+
+    WriteSavedGame(file);
     glk_stream_close(file, NULL);
     Output(sys[SAVED]);
 }
@@ -162,6 +168,61 @@ void LoadGame(void)
     StopTime = 1;
     should_look_in_transcript = 1;
 }
+
+#ifdef QUENGLE
+/* quengle: autosave, in the save file's own format. written at each line input (parser.c), read once at startup
+   (scott.c). the screen comes back from the host's replay (host.js) */
+static strid_t QuengleAutosaveStream(glui32 mode)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_TextMode,
+        "/autosave/scott.sav", 0);
+    strid_t s = NULL;
+    if (fref == NULL)
+        return NULL;
+    if (mode == filemode_Write || glk_fileref_does_file_exist(fref))
+        s = glk_stream_open_file(fref, mode, 0);
+    glk_fileref_destroy(fref);
+    return s;
+}
+
+int QuengleHasAutosave(void)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_TextMode,
+        "/autosave/scott.sav", 0);
+    int exists = fref != NULL && glk_fileref_does_file_exist(fref);
+    if (fref != NULL)
+        glk_fileref_destroy(fref);
+    return exists;
+}
+
+void QuengleAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Write);
+    if (file == NULL)
+        return;
+    WriteSavedGame(file);
+    glk_stream_close(file, NULL);
+}
+
+/* 1 when the autosave was read and applied; a file that doesn't fit this game is ignored */
+int QuengleRestoreAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Read);
+    if (file == NULL)
+        return 0;
+    SavedState *state = SaveCurrentState();
+    int success = ReadSavedGame(file, state);
+    glk_stream_close(file, NULL);
+    if (success)
+        RestoreState(state);
+    FreeSavedState(state);
+    if (success) {
+        SaveUndo();
+        JustStarted = 0;
+    }
+    return success;
+}
+#endif
 
 void RestartGame(void)
 {
@@ -358,6 +419,29 @@ static glui32 GetKeyPress(int unicode)
     return ev.val1;
 }
 
+#ifdef QUENGLE
+/* quengle: a line's first letter. a single-key wait has nothing to type into on an ipad without a keyboard: a tap,
+   or the key bar's return, sent return ("answer yes or no" forever). a line gets the prompt, the keyboard, the key
+   bar: "yes", "y", "No" all do */
+static glui32 QuengleFirstLetter(void)
+{
+    static char buf[64];
+    event_t ev;
+    glui32 i;
+
+    glk_request_line_event(Bottom, buf, sizeof buf - 1, 0);
+    do {
+        glk_select(&ev);
+        if (ev.type != evtype_LineInput)
+            Updates(ev);
+    } while (ev.type != evtype_LineInput);
+    for (i = 0; i < ev.val1; i++)
+        if ((unsigned char)buf[i] > ' ')
+            return (unsigned char)buf[i];
+    return 0;
+}
+#endif
+
 /* Prompt for a yes/no response via single-character input.
    Uses the localized first characters of sys[YES] and sys[NO]. */
 int YesOrNo(void)
@@ -367,17 +451,23 @@ int YesOrNo(void)
     const char n = tolower((unsigned char)sys[NO][0]);
 
     do {
+#ifdef QUENGLE
+        glui32 key = QuengleFirstLetter();
+#else
         glui32 key = GetKeyPress(1);
         if ((glsi32)key > ' ') {
             glk_put_char_stream_uni(glk_window_get_stream(Bottom), key);
         }
+#endif
         const char reply = key < 0x100 ? tolower((int)key) : 0;
         if (reply == y) {
             result = 1;
         } else if (reply == n) {
             result = 2;
         } else {
+#ifndef QUENGLE
             Output("\n");
+#endif
             Output(sys[ANSWER_YES_OR_NO]);
         }
     } while (result == 0);

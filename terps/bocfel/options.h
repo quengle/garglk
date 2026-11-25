@@ -52,13 +52,13 @@ struct Options {
     std::optional<unsigned long> random_seed = std::nullopt;
     std::optional<std::string> random_device = std::nullopt;
 
-    bool autosave = false;
+    bool autosave = true; // quengle: emglken builds with ZTERP_NO_OPTIONS, so defaults are the only knob
     bool skip_autorestore = false;
     std::optional<std::string> autosave_directory = std::nullopt;
-    bool autosave_librarystate = false;
+    bool autosave_librarystate = true; // quengle: our remglk-rs patch implements the glkunix library-state hooks
     bool persistent_transcript = false;
     std::optional<std::string> editor = std::nullopt;
-    bool warn_on_v6 = true;
+    bool warn_on_v6 = false; // quengle
     bool redirect_v6_windows = true;
     bool disable_v6_hacks = false;
     double v6_hack_max_scale = 4.0;

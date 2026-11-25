@@ -127,6 +127,18 @@ static void LineInput(void)
         /* Pretend the previous character was a newline so OutChar's
            capitalization logic treats the prompt as a fresh sentence. */
         LastChar = '\n';
+#ifdef QUENGLE
+        /* quengle: the state at the prompt is the autosave; after a continue the replayed screen already ends
+           with the prompt */
+        extern int QuengleSkipPrompt;
+        extern void QuengleAutosave(void);
+        QuengleAutosave();
+        if (QuengleSkipPrompt) {
+            QuengleSkipPrompt = 0;
+            /* the newline set above would be flushed below, and the typed command would land under the prompt */
+            LastChar = 0;
+        } else
+#endif
         if (Version == QUESTPROBE3_TYPE) {
             /* QP3 prefixes the prompt with the active character's name
                ("THING I want you to" / "HUMAN TORCH I want you to"),

@@ -87,6 +87,26 @@ static winid_t gln_main_window = NULL,
                gln_status_window = NULL,
                gln_graphics_window = NULL;
 
+#ifdef QUENGLE
+/* quengle: os_readchar's key request, left standing between its 20 ms polls. cancelling and re-requesting it on
+   every poll had the display scroll to the input each time: menu games (adrian mole) couldn't be scrolled back */
+static int quengle_char_pending = 0;
+
+static void
+quengle_drop_pending_char (void)
+{
+  if (quengle_char_pending)
+    {
+      glk_cancel_char_event (gln_main_window);
+      quengle_char_pending = 0;
+    }
+}
+#define QUENGLE_DROP_PENDING_CHAR() quengle_drop_pending_char ()
+#else
+#define QUENGLE_DROP_PENDING_CHAR()
+#endif
+
+
 /*
  * Transcript stream and input log.  These are NULL if there is no current
  * collection of these strings.
@@ -1503,6 +1523,10 @@ static const int GLN_GRAPHICS_PIXEL = 1;
 
 /* Proportion of the display to use for graphics. */
 static const glui32 GLN_GRAPHICS_PROPORTION = 30;
+#ifdef QUENGLE
+/* the share quengle_graphics_draw last gave the graphics window; 0 for a fresh window (GLN_GRAPHICS_PROPORTION) */
+static glui32 quengle_proportion = 0;
+#endif
 
 /*
  * Special title picture number, requiring its own handling, and count of
@@ -1591,6 +1615,9 @@ gln_graphics_open (void)
 {
   if (!gln_graphics_window)
     {
+#ifdef QUENGLE
+      quengle_proportion = 0;
+#endif
       gln_graphics_window = glk_window_open (gln_main_window,
                                              winmethod_Above
                                              | winmethod_Proportional,
@@ -1812,8 +1839,14 @@ gln_graphics_clear_and_border (winid_t glk_window,
    * Set the graphics window background to match the main window background,
    * as best as we can tell, and clear the window.
    */
+#ifndef QUENGLE
   glk_window_set_background_color (glk_window, background);
+#endif
   glk_window_clear (glk_window);
+#ifdef QUENGLE
+  /* quengle: transparent (host.js), no border or shading: they're sized for whole-pixel scaling */
+  return;
+#endif
 #ifndef GARGLK
   /*
    * For very small pictures, just border them, but don't try and
@@ -2276,6 +2309,184 @@ gln_graphics_paint_everything (winid_t glk_window,
 	}
 }
 
+#ifdef QUENGLE
+/* quengle: pictures go to the display whole, as a png image drawn scaled into the graphics window, in place of
+   glk.c's region painting (fill rects, 256 per 50 ms tick: pictures visibly built up over seconds). as in
+   magnetic's glk.c (Scripts/bocfel/magnetic.patch): indexed png, uncompressed deflate blocks, no zlib needed */
+glui32 quengle_add_image (const unsigned char *buf, glui32 len);
+
+/* at most 2x, and no more than this share of the screen's height: the rest is the story's */
+#define QUENGLE_MAX_SCALE 2.0
+#define QUENGLE_MAX_SHARE 40
+
+static glui32
+quengle_crc (const unsigned char *p, size_t n)
+{
+  static glui32 table[256];
+  glui32 crc = 0xffffffffu;
+  size_t i;
+  if (!table[1])
+    for (i = 0; i < 256; i++)
+      {
+        glui32 c = (glui32) i;
+        int k;
+        for (k = 0; k < 8; k++)
+          c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
+        table[i] = c;
+      }
+  for (i = 0; i < n; i++)
+    crc = table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
+  return ~crc;
+}
+
+static unsigned char *
+quengle_put32be (unsigned char *p, glui32 v)
+{
+  p[0] = (unsigned char) (v >> 24);
+  p[1] = (unsigned char) (v >> 16);
+  p[2] = (unsigned char) (v >> 8);
+  p[3] = (unsigned char) v;
+  return p + 4;
+}
+
+static unsigned char *
+quengle_png (const gln_byte pixels[], int width, int height, const glui32 palette[], glui32 *out_len)
+{
+  glui32 raw = (glui32) height * (glui32) (width + 1);   /* a filter byte per row */
+  glui32 blocks = (raw + 65534) / 65535;
+  glui32 idat = 2 + raw + 5 * blocks + 4;
+  glui32 size = 8 + (12 + 13) + (12 + GLN_PALETTE_SIZE * 3) + (12 + idat) + 12;
+  glui32 a = 1, b = 0, left, i;
+  unsigned char *png, *p, *c;
+  int x = -1, y = 0;
+
+  if (raw == 0 || !(png = malloc (size)))
+    return NULL;
+  p = png;
+  memcpy (p, "\x89PNG\r\n\x1a\n", 8);
+  p += 8;
+
+  p = quengle_put32be (p, 13);
+  c = p;
+  memcpy (p, "IHDR", 4);
+  p = quengle_put32be (p + 4, (glui32) width);
+  p = quengle_put32be (p, (glui32) height);
+  *p++ = 8;  /* bit depth */
+  *p++ = 3;  /* indexed */
+  *p++ = 0;
+  *p++ = 0;
+  *p++ = 0;
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, GLN_PALETTE_SIZE * 3);
+  c = p;
+  memcpy (p, "PLTE", 4);
+  p += 4;
+  for (i = 0; i < GLN_PALETTE_SIZE; i++)
+    {
+      *p++ = (unsigned char) (palette[i] >> 16);
+      *p++ = (unsigned char) (palette[i] >> 8);
+      *p++ = (unsigned char) palette[i];
+    }
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, idat);
+  c = p;
+  memcpy (p, "IDAT", 4);
+  p += 4;
+  *p++ = 0x78;
+  *p++ = 0x01;
+  for (left = raw; left > 0;)
+    {
+      glui32 n = left < 65535 ? left : 65535;
+      left -= n;
+      *p++ = left ? 0 : 1;
+      *p++ = (unsigned char) n;
+      *p++ = (unsigned char) (n >> 8);
+      *p++ = (unsigned char) ~n;
+      *p++ = (unsigned char) (~n >> 8);
+      while (n--)
+        {
+          unsigned char v = x < 0 ? 0 : (unsigned char) pixels[y * width + x];
+          if (++x == width)
+            {
+              x = -1;
+              y++;
+            }
+          *p++ = v;
+          a = (a + v) % 65521;
+          b = (b + a) % 65521;
+        }
+    }
+  p = quengle_put32be (p, (b << 16) | a);
+  p = quengle_put32be (p, quengle_crc (c, p - c));
+
+  p = quengle_put32be (p, 0);
+  c = p;
+  memcpy (p, "IEND", 4);
+  p = quengle_put32be (p + 4, quengle_crc (c, 4));
+
+  *out_len = (glui32) (p - png);
+  return png;
+}
+
+/* fresh: a new picture (else a repaint after a resize, same image). scaled to fit, centered; the window is then
+   resized to the picture (glk.c keeps it at 30% whatever the picture) */
+static void
+quengle_graphics_draw (const gln_byte off_screen[], const glui32 palette[], int fresh)
+{
+  static glui32 image = 0;
+  glui32 window_width, window_height, total, wanted;
+  double scale;
+  int width, height;
+
+  if (fresh || !image)
+    {
+      glui32 len;
+      unsigned char *png = quengle_png (off_screen, gln_graphics_width, gln_graphics_height, palette, &len);
+      if (!png)
+        return;
+      image = quengle_add_image (png, len);
+      free (png);
+    }
+  if (!image)
+    return;
+
+  glk_window_get_size (gln_graphics_window, &window_width, &window_height);
+  if (!quengle_proportion)
+    quengle_proportion = GLN_GRAPHICS_PROPORTION;
+  /* buffer windows measure in characters, so the screen's height comes from the share we're at */
+  total = window_height * 100 / quengle_proportion;
+  scale = (double) window_width / gln_graphics_width;
+  if (scale > QUENGLE_MAX_SCALE)
+    scale = QUENGLE_MAX_SCALE;
+  if ((double) total * QUENGLE_MAX_SHARE / 100 / gln_graphics_height < scale)
+    scale = (double) total * QUENGLE_MAX_SHARE / 100 / gln_graphics_height;
+  if (total > 0)
+    {
+      wanted = (glui32) ((gln_graphics_height * scale * 100 + total - 1) / total);
+      if (wanted < 1)
+        wanted = 1;
+      if (wanted != quengle_proportion)
+        {
+          /* remglk sends no arrange event for our own change; it has the new size right away */
+          quengle_proportion = wanted;
+          glk_window_set_arrangement (glk_window_get_parent (gln_graphics_window),
+                                      winmethod_Above | winmethod_Proportional, quengle_proportion, gln_graphics_window);
+          glk_window_get_size (gln_graphics_window, &window_width, &window_height);
+        }
+    }
+  if ((double) window_height / gln_graphics_height < scale)
+    scale = (double) window_height / gln_graphics_height;
+  width = (int) (gln_graphics_width * scale);
+  height = (int) (gln_graphics_height * scale);
+  if (width > 0 && height > 0)
+    glk_image_draw_scaled (gln_graphics_window, image,
+                           ((int) window_width - width) / 2, ((int) window_height - height) / 2, width, height);
+}
+#endif
+
+
 /*
  * gln_graphics_timeout()
  *
@@ -2321,6 +2532,9 @@ gln_graphics_timeout (void)
   if (!gln_graphics_active)
     return;
   assert (gln_graphics_window);
+#ifdef QUENGLE
+  int fresh = gln_graphics_new_picture;
+#endif
 
   /*
    * On detecting a repaint request, note the flag in a local static variable,
@@ -2448,7 +2662,9 @@ gln_graphics_timeout (void)
       deferred_repaint = FALSE;
     }
 
-#ifndef GARGLK
+#if defined (QUENGLE)
+  quengle_graphics_draw (off_screen, palette, fresh);
+#elif !defined (GARGLK)
   /*
    * Make a portion of an image pass, from lower to higher image layers,
    * scanning for invalidated pixels that are in the current image layer we
@@ -2617,6 +2833,7 @@ gln_graphics_handle_title_picture (void)
   gln_standout_string ("\n[ Press any key to skip the title picture... ]\n\n");
 
   /* Wait until a keypress or graphics rendering is complete. */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_char_event (gln_main_window);
   do
     {
@@ -3787,8 +4004,12 @@ gln_status_notify (void)
 {
   if (gln_status_window)
     gln_status_update ();
+#ifndef QUENGLE
+  /* quengle: not the "[ game name …padding… ]" line in the story: the app shows the title, and the padding
+     wrapped its "]" onto a line of its own */
   else
     gln_status_print ();
+#endif
 }
 
 
@@ -5498,6 +5719,7 @@ os_input (char *buffer, int size)
    * No input log being read, or we just hit the end of file on one.  Revert
    * to normal line input; start by getting a new line from Glk.
    */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_line_event (gln_main_window, buffer, size - 1, 0);
   gln_event_wait (evtype_LineInput, &event);
 
@@ -5707,7 +5929,13 @@ os_readchar (int millis)
    */
   do
     {
+#ifdef QUENGLE
+      if (!quengle_char_pending)
+        glk_request_char_event (gln_main_window);
+      quengle_char_pending = 1;
+#else
       glk_request_char_event (gln_main_window);
+#endif
       if (glk_gestalt (gestalt_Timer, 0))
         {
           gln_arbitrate_request_timer_events (millis);
@@ -5720,13 +5948,18 @@ os_readchar (int millis)
            */
           if (event.type == evtype_Timer)
             {
+#ifndef QUENGLE
               glk_cancel_char_event (gln_main_window);
+#endif
               gln_watchdog_tick ();
               return 0;
             }
         }
       else
         gln_event_wait (evtype_CharInput, &event);
+#ifdef QUENGLE
+      quengle_char_pending = 0;
+#endif
     }
   while (event.val1 > UCHAR_MAX && event.val1 != keycode_Return);
 
@@ -5835,6 +6068,7 @@ os_stoplist (void)
    * Look for a keypress, with a very short timeout in place, in a similar
    * way as done for os_readchar() above.
    */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_char_event (gln_main_window);
   gln_arbitrate_request_timer_events (GLN_STOPLIST_TIMEOUT);
   gln_event_wait_2 (evtype_CharInput, evtype_Timer, &event);
@@ -5889,6 +6123,7 @@ gln_confirm (const char *prompt)
 
   /* Wait for a single 'Y' or 'N' character response. */
   response = ' ';
+  QUENGLE_DROP_PENDING_CHAR ();
   do
     {
       glk_request_char_event (gln_main_window);
@@ -6664,10 +6899,22 @@ gln_main (void)
           break;
         }
 
-      /* Print out a short banner. */
-      gln_header_string ("\nLevel 9 Interpreter, version 5.2\n");
-      gln_banner_string ("Written by Glen Summers and David Kinder\n"
-                         "Glk interface by Simon Baldwin\n\n");
+#ifdef QUENGLE
+      /* quengle: continue from the autosave (level9.c); the host replays the screen, so no banner either. only on
+         the first load: a restart starts the game afresh */
+      static int quengle_tried = FALSE;
+      extern L9BOOL quengle_restore (void);
+      if (!quengle_tried && (quengle_tried = TRUE) && quengle_restore ())
+        /* the prompt is in the replayed screen: no "> " of glk.c's own before the first line */
+        gln_output_prompt = TRUE;
+      else
+#endif
+        {
+          /* Print out a short banner. */
+          gln_header_string ("\nLevel 9 Interpreter, version 5.2\n");
+          gln_banner_string ("Written by Glen Summers and David Kinder\n"
+                             "Glk interface by Simon Baldwin\n\n");
+        }
 
       /*
        * Set the stop reason indicator to none.  A game will then exit with a
