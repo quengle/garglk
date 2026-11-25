@@ -45,6 +45,33 @@
 
 #include "level9.h"
 
+#ifdef QUENGLE
+/* quengle: a part's own picture file beside it (gamedat2.dat → gamedat2.pic/.cga/.hrc), looked for as glk.c looks
+   for the first part's: the archers (amstrad cpc) has one per part, and part changes and continues loaded none */
+static char *quengle_part_pictures(const char *name)
+{
+	static const char *exts[] = { ".pic", ".PIC", ".cga", ".CGA", ".hrc", ".HRC" };
+	static char pic[MAX_PATH];
+	char *dot;
+	FILE *f;
+	unsigned i;
+	if (strlen(name) + 5 >= MAX_PATH) return NULL;
+	strcpy(pic, name);
+	dot = strrchr(pic, '.');
+	if (!dot || strchr(dot, '/')) dot = pic + strlen(pic);
+	for (i = 0; i < sizeof exts / sizeof exts[0]; i++)
+	{
+		strcpy(dot, exts[i]);
+		if ((f = fopen(pic, "rb")) != NULL)
+		{
+			fclose(f);
+			return pic;
+		}
+	}
+	return NULL;
+}
+#endif
+
 /* #define L9DEBUG */
 /* #define CODEFOLLOW */
 /* #define FULLSCAN */
@@ -1969,7 +1996,11 @@ void calldriver(void)
 		{
 			os_set_filenumber(NewName,MAX_PATH,*a6);
 		}
+#ifdef QUENGLE
+		LoadGame2(NewName,quengle_part_pictures(NewName));
+#else
 		LoadGame2(NewName,NULL);
+#endif
 	}
 	else driver(d0,a6);
 }
