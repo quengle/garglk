@@ -455,7 +455,11 @@ static void Delay(unsigned char seconds)
         Updates(ev);
     } while (ev.type != evtype_Timer);
 
+#ifdef QUENGLE
+    RequestAnimationTimer(AnimationRunning);
+#else
     glk_request_timer_events(AnimationRunning);
+#endif
 }
 
 static void Wear(unsigned char obj)

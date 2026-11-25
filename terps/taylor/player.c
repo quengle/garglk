@@ -666,7 +666,11 @@ static void RunOneInput(void)
 
     } while (waitflag != -1 && Flag[waitflag] > 0);
     if (AnimationRunning)
+#ifdef QUENGLE
+        RequestAnimationTimer(AnimationRunning);
+#else
         glk_request_timer_events(AnimationRunning);
+#endif
     if (waitflag != -1)
         Flag[waitflag] = 0;
 }

@@ -316,6 +316,11 @@ void Updates(event_t ev)
         Look();
         Resizing = 0;
     } else if (ev.type == evtype_Timer && TAYLOR_GRAPHICS_ENABLED) {
+#ifdef QUENGLE
+        /* the steps of one batched tick (animations.c); an animation that stops partway stops the rest */
+        extern int QuengleAnimationSteps;
+        for (int step = 0; step < QuengleAnimationSteps && AnimationRunning; step++)
+#endif
         switch (BaseGame) {
         case REBEL_PLANET:
             UpdateRebelAnimations();

@@ -15,4 +15,8 @@ void LoadKaylethAnimationData(void);
 
 extern int AnimationRunning;
 
+#ifdef QUENGLE
+void RequestAnimationTimer(int rate);
+#endif
+
 #endif /* animations_h */
