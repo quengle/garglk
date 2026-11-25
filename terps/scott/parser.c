@@ -750,8 +750,12 @@ static void LineInput(void)
 
     for (;;) {
 #ifdef QUENGLE
-        /* quengle: the state as it stands at the prompt */
+        /* quengle: the state as it stands at the prompt. a continue starts here, and its screen (replayed by the
+           host) already ends with the prompt */
         QuengleAutosave();
+        if (quengle_resumed)
+            quengle_resumed = 0;
+        else
 #endif
         Display(Bottom, "\n%s", sys[WHAT_NOW]);
         glk_request_line_event_uni(Bottom, unibuf, (glui32)(INPUT_BUFFER_SIZE - 1), 0);

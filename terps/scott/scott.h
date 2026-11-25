@@ -203,7 +203,10 @@ extern strid_t Transcript;
 extern glui32 TopWidth, TopHeight;
 extern int JustStarted;
 #ifdef QUENGLE
+extern int quengle_resumed;
+int QuengleHasAutosave(void);
 void QuengleAutosave(void);
+int QuengleRestoreAutosave(void);
 #endif
 extern int should_restart;
 

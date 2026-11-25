@@ -185,6 +185,16 @@ static strid_t QuengleAutosaveStream(glui32 mode)
     return s;
 }
 
+int QuengleHasAutosave(void)
+{
+    frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_TextMode,
+        "/autosave/scott.sav", 0);
+    int exists = fref != NULL && glk_fileref_does_file_exist(fref);
+    if (fref != NULL)
+        glk_fileref_destroy(fref);
+    return exists;
+}
+
 void QuengleAutosave(void)
 {
     strid_t file = QuengleAutosaveStream(filemode_Write);
@@ -192,6 +202,25 @@ void QuengleAutosave(void)
         return;
     WriteSavedGame(file);
     glk_stream_close(file, NULL);
+}
+
+/* 1 when the autosave was read and applied; a file that doesn't fit this game is ignored */
+int QuengleRestoreAutosave(void)
+{
+    strid_t file = QuengleAutosaveStream(filemode_Read);
+    if (file == NULL)
+        return 0;
+    SavedState *state = SaveCurrentState();
+    int success = ReadSavedGame(file, state);
+    glk_stream_close(file, NULL);
+    if (success)
+        RestoreState(state);
+    FreeSavedState(state);
+    if (success) {
+        SaveUndo();
+        JustStarted = 0;
+    }
+    return success;
 }
 #endif
 
