@@ -6899,10 +6899,22 @@ gln_main (void)
           break;
         }
 
-      /* Print out a short banner. */
-      gln_header_string ("\nLevel 9 Interpreter, version 5.2\n");
-      gln_banner_string ("Written by Glen Summers and David Kinder\n"
-                         "Glk interface by Simon Baldwin\n\n");
+#ifdef QUENGLE
+      /* quengle: continue from the autosave (level9.c); the host replays the screen, so no banner either. only on
+         the first load: a restart starts the game afresh */
+      static int quengle_tried = FALSE;
+      extern L9BOOL quengle_restore (void);
+      if (!quengle_tried && (quengle_tried = TRUE) && quengle_restore ())
+        /* the prompt is in the replayed screen: no "> " of glk.c's own before the first line */
+        gln_output_prompt = TRUE;
+      else
+#endif
+        {
+          /* Print out a short banner. */
+          gln_header_string ("\nLevel 9 Interpreter, version 5.2\n");
+          gln_banner_string ("Written by Glen Summers and David Kinder\n"
+                             "Glk interface by Simon Baldwin\n\n");
+        }
 
       /*
        * Set the stop reason indicator to none.  A game will then exit with a
