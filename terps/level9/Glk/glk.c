@@ -87,6 +87,26 @@ static winid_t gln_main_window = NULL,
                gln_status_window = NULL,
                gln_graphics_window = NULL;
 
+#ifdef QUENGLE
+/* quengle: os_readchar's key request, left standing between its 20 ms polls. cancelling and re-requesting it on
+   every poll had the display scroll to the input each time: menu games (adrian mole) couldn't be scrolled back */
+static int quengle_char_pending = 0;
+
+static void
+quengle_drop_pending_char (void)
+{
+  if (quengle_char_pending)
+    {
+      glk_cancel_char_event (gln_main_window);
+      quengle_char_pending = 0;
+    }
+}
+#define QUENGLE_DROP_PENDING_CHAR() quengle_drop_pending_char ()
+#else
+#define QUENGLE_DROP_PENDING_CHAR()
+#endif
+
+
 /*
  * Transcript stream and input log.  These are NULL if there is no current
  * collection of these strings.
@@ -2617,6 +2637,7 @@ gln_graphics_handle_title_picture (void)
   gln_standout_string ("\n[ Press any key to skip the title picture... ]\n\n");
 
   /* Wait until a keypress or graphics rendering is complete. */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_char_event (gln_main_window);
   do
     {
@@ -5498,6 +5519,7 @@ os_input (char *buffer, int size)
    * No input log being read, or we just hit the end of file on one.  Revert
    * to normal line input; start by getting a new line from Glk.
    */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_line_event (gln_main_window, buffer, size - 1, 0);
   gln_event_wait (evtype_LineInput, &event);
 
@@ -5707,7 +5729,13 @@ os_readchar (int millis)
    */
   do
     {
+#ifdef QUENGLE
+      if (!quengle_char_pending)
+        glk_request_char_event (gln_main_window);
+      quengle_char_pending = 1;
+#else
       glk_request_char_event (gln_main_window);
+#endif
       if (glk_gestalt (gestalt_Timer, 0))
         {
           gln_arbitrate_request_timer_events (millis);
@@ -5720,13 +5748,18 @@ os_readchar (int millis)
            */
           if (event.type == evtype_Timer)
             {
+#ifndef QUENGLE
               glk_cancel_char_event (gln_main_window);
+#endif
               gln_watchdog_tick ();
               return 0;
             }
         }
       else
         gln_event_wait (evtype_CharInput, &event);
+#ifdef QUENGLE
+      quengle_char_pending = 0;
+#endif
     }
   while (event.val1 > UCHAR_MAX && event.val1 != keycode_Return);
 
@@ -5835,6 +5868,7 @@ os_stoplist (void)
    * Look for a keypress, with a very short timeout in place, in a similar
    * way as done for os_readchar() above.
    */
+  QUENGLE_DROP_PENDING_CHAR ();
   glk_request_char_event (gln_main_window);
   gln_arbitrate_request_timer_events (GLN_STOPLIST_TIMEOUT);
   gln_event_wait_2 (evtype_CharInput, evtype_Timer, &event);
@@ -5889,6 +5923,7 @@ gln_confirm (const char *prompt)
 
   /* Wait for a single 'Y' or 'N' character response. */
   response = ' ';
+  QUENGLE_DROP_PENDING_CHAR ();
   do
     {
       glk_request_char_event (gln_main_window);
