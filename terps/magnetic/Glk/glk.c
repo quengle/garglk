@@ -5464,6 +5464,32 @@ static void
 gms_buffer_input (void)
 {
   event_t event;
+#ifdef QUENGLE
+  /* quengle: magnetic windows games start with pictures off (their own menu turned them on), so a fresh start
+     quietly types the game's GRAPHICS command first. its reply (a blank line, a second prompt) is cut from the
+     buffered output before anything shows. the game keeps the setting in its memory: saves and continues have it,
+     and a player who types GRAPHICS again turns pictures off */
+  static int quengle_fed = FALSE;
+  static long quengle_mark = -1;
+
+  if (quengle_mark >= 0)
+    {
+      if (gms_output_length > quengle_mark)
+        gms_output_length = quengle_mark;
+      quengle_mark = -1;
+    }
+  if (!quengle_fed)
+    {
+      quengle_fed = TRUE;
+      if (!quengle_continued && ms_is_magwin ())
+        {
+          strcpy (gms_input_buffer, "graphics\n");
+          gms_input_length = strlen (gms_input_buffer);
+          quengle_mark = gms_output_length;
+          return;
+        }
+    }
+#endif
 
   /*
    * Update the current status line display, and flush any pending buffered
