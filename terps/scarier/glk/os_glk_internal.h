@@ -81,9 +81,14 @@ extern "C" {
 #endif
 
 /* GSC_AUTOSAVE: the autosave/autorestore code, kept apart from the rest of
- * what SPATTERLIGHT selects so another host can build it. */
+ * what SPATTERLIGHT selects so another host can build it.
+ * GSC_AUTOSAVE_ADOPTS_WINDOWS: the restored library brings the windows (and
+ * the rest of the Glk objects); without it they open as on a fresh start. */
 #if defined(SPATTERLIGHT)
 # define GSC_AUTOSAVE 1
+#endif
+#ifdef SPATTERLIGHT
+# define GSC_AUTOSAVE_ADOPTS_WINDOWS 1
 #endif
 
 /* Blorb resource map, for ADRIFT 5 graphics/sound (the game file is a Blorb),

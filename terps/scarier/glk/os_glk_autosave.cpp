@@ -444,6 +444,7 @@ gsc_stash_frontend_state (ScarierGlkFrontendState *st)
 {
   int ch;
 
+#ifdef SPATTERLIGHT
   st->mainwintag = gsc_main_window ? gsc_main_window->tag : 0;
   st->statuswintag = gsc_status_window ? gsc_status_window->tag : 0;
   st->sidewintag = gsc_a5_side_window ? gsc_a5_side_window->tag : 0;
@@ -469,6 +470,10 @@ gsc_stash_frontend_state (ScarierGlkFrontendState *st)
   st->map_cy = gsc_map_cam.cy;
   st->map_page = gsc_map_cam.page;
   st->colour_on = gsc_colour_enabled;
+#else
+  /* quengle: no glk objects to carry, the windows are opened afresh */
+  (void) ch;
+#endif
 
   /* Saving at a question asked partway through a turn: the generators as
      they stood when the turn began, which is where the relaunch runs it
@@ -520,6 +525,7 @@ gsc_stash_rng (ScarierGlkFrontendState *st)
 void
 gsc_recover_frontend_state (const ScarierGlkFrontendState *st)
 {
+#ifdef SPATTERLIGHT
   int ch;
 
   gsc_main_window = gli_window_for_tag (st->mainwintag);
@@ -568,6 +574,7 @@ gsc_recover_frontend_state (const ScarierGlkFrontendState *st)
   /* The restored map window holds the app's snapshot pixels, not ours:
      force the next redraw to flush the whole surface. */
   gsc_map_screen_drop ();
+#endif
 
   /* Restore the RNG to its saved position.  The silent autorestore boot
      re-seeded and may have drawn from it; this puts it back exactly where
@@ -612,8 +619,15 @@ gsc_autorestore_replace_state (bool (*apply) (const std::string &data))
   if (!restored)
     {
       scarier_autosave_discard ();
+#ifdef SPATTERLIGHT
       win_reset ();
       exit (0);
+#else
+      /* the silent boot has used up the opening: nothing sane to go on with */
+      glk_set_window (gsc_main_window);
+      gsc_normal_string ("\n[This game's autosave couldn't be read. Restart to play.]\n");
+      glk_exit ();
+#endif
     }
 }
 
