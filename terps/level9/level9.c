@@ -1896,6 +1896,12 @@ void showbitmap(L9BYTE *a6)
 	printf("driver - showbitmap");
 #endif
 
+#ifdef QUENGLE
+	{
+		extern void quengle_note_bitmap(int pic, int x, int y);
+		quengle_note_bitmap(a6[1], a6[3], a6[5]);
+	}
+#endif
 	os_show_bitmap(a6[1],a6[3],a6[5]);
 }
 
@@ -2849,6 +2855,116 @@ L9BOOL inputV2(int *wordcount)
 	}
 }
 
+#ifdef QUENGLE
+#include "glk.h"
+#include "glkstart.h"
+/* quengle: autosave. the whole workspace (variables, lists, stack, codeptr) plus the random seed, screen mode and
+   picture goes to this file whenever the game asks for a new line, codeptr on the input opcode: a continue loads
+   it right after LoadGame and that opcode asks again. the screen comes back from the host's replay (host.js) */
+static const char quengle_magic[8] = "QL9SAV02";
+/* the picture up when the autosave is taken: 0 none, 1 line drawing (show_picture), 2 bitmaps. v4 games draw a
+   room picture at 0,0 and objects over it (DecodeBitmap keeps one bitmap): the base and what's on it since */
+#define QUENGLE_MAX_PICS 8
+static int quengle_pic_kind = 0, quengle_pic = 0, quengle_npics = 0, quengle_pics[QUENGLE_MAX_PICS][3];
+void detect_gfx_mode(void);
+
+void quengle_note_bitmap(int pic, int x, int y)
+{
+	if (quengle_pic_kind != 2 || (x == 0 && y == 0) || quengle_npics == QUENGLE_MAX_PICS)
+		quengle_npics = 0;
+	quengle_pic_kind = 2;
+	quengle_pics[quengle_npics][0] = pic;
+	quengle_pics[quengle_npics][1] = x;
+	quengle_pics[quengle_npics][2] = y;
+	quengle_npics++;
+}
+
+static strid_t quengle_autosave_stream(glui32 mode)
+{
+	frefid_t fref = glkunix_fileref_create_by_name_uncleaned(fileusage_SavedGame | fileusage_BinaryMode,
+		"/autosave/level9.sav", 0);
+	strid_t s = NULL;
+	if (!fref) return NULL;
+	if (mode == filemode_Write || glk_fileref_does_file_exist(fref))
+		s = glk_stream_open_file(fref, mode, 0);
+	glk_fileref_destroy(fref);
+	return s;
+}
+
+static void quengle_autosave(void)
+{
+	int extra[6 + 3 * QUENGLE_MAX_PICS];
+	strid_t s = quengle_autosave_stream(filemode_Write);
+	if (!s) return;
+	/* the header save() fills in; the live workspace doesn't carry it */
+	workspace.Id = L9_ID;
+	workspace.listsize = LISTAREASIZE;
+	workspace.stacksize = STACKSIZE;
+	workspace.filenamesize = MAX_PATH;
+	workspace.codeptr = codeptr - acodeptr;
+	/* multi-part games load the next file themselves: a continue has to start from the part that was running */
+	strncpy(workspace.filename, LastGame, MAX_PATH - 1);
+	workspace.filename[MAX_PATH - 1] = 0;
+	extra[0] = randomseed;
+	extra[1] = l9textmode;
+	extra[2] = screencalled;
+	extra[3] = showtitle;
+	extra[4] = quengle_pic_kind;
+	extra[5] = quengle_pic_kind == 1 ? quengle_pic : quengle_npics;
+	memcpy(extra + 6, quengle_pics, sizeof quengle_pics);
+	glk_put_buffer_stream(s, (char *)quengle_magic, 8);
+	glk_put_buffer_stream(s, (char *)&workspace, sizeof workspace);
+	glk_put_buffer_stream(s, (char *)extra, sizeof extra);
+	glk_stream_close(s, NULL);
+}
+
+/* TRUE when the game continues from the autosave (after LoadGame). a file that doesn't fit is ignored */
+L9BOOL quengle_restore(void)
+{
+	static GameState temp;
+	int extra[6 + 3 * QUENGLE_MAX_PICS];
+	char magic[8];
+	L9BOOL ok = FALSE;
+	strid_t s = quengle_autosave_stream(filemode_Read);
+	if (!s) return FALSE;
+	if (glk_get_buffer_stream(s, magic, 8) == 8 && memcmp(magic, quengle_magic, 8) == 0
+		&& glk_get_buffer_stream(s, (char *)&temp, sizeof temp) == sizeof temp
+		&& glk_get_buffer_stream(s, (char *)extra, sizeof extra) == sizeof extra
+		&& temp.Id == L9_ID
+		/* another part than the one loaded: load that one first, with its own picture file if it has one */
+		&& (StrCompare(temp.filename, LastGame) == 0 || LoadGame2(temp.filename, quengle_part_pictures(temp.filename)))
+		&& temp.codeptr < FileSize)
+	{
+		memmove(&workspace, &temp, sizeof(GameState));
+		codeptr = acodeptr + workspace.codeptr;
+		randomseed = (L9UINT16)extra[0];
+		screencalled = extra[2];
+		showtitle = extra[3];
+		l9textmode = extra[1];
+		if (l9textmode)
+		{
+			detect_gfx_mode();
+			os_graphics(L9GameType == L9_V4 ? 2 : picturedata ? 1 : 0);
+		}
+		if (extra[4] == 1)
+			show_picture(extra[5]);
+		else if (extra[4] == 2 && extra[5] > 0 && extra[5] <= QUENGLE_MAX_PICS)
+		{
+			int i, n = extra[5];
+			for (i = 0; i < n; i++)
+			{
+				int *p = extra + 6 + 3 * i;
+				quengle_note_bitmap(p[0], p[1], p[2]);
+				os_show_bitmap(p[0], p[1], p[2]);
+			}
+		}
+		ok = TRUE;
+	}
+	glk_stream_close(s, NULL);
+	return ok;
+}
+#endif
+
 void input(void)
 {
 	if (L9GameType == L9_V3 && FirstPicture >= 0)
@@ -2862,6 +2978,11 @@ void input(void)
 	   are called out of line */
 
 	codeptr--;
+#ifdef QUENGLE
+	/* a new line about to be asked for (not words left from the last one, nor a cheat replay) */
+	if ((L9GameType <= L9_V2 || ibuffptr == NULL) && !Cheating)
+		quengle_autosave();
+#endif
 	if (L9GameType<=L9_V2)
 	{
 		int wordcount;
@@ -3546,6 +3667,11 @@ void absrunsub(int d0)
 
 void show_picture(int pic)
 {
+#ifdef QUENGLE
+	quengle_pic_kind = 1;
+	quengle_pic = pic;
+	quengle_npics = 0;
+#endif
 	if (L9GameType == L9_V3 && strlen(FirstLine) == 0)
 	{
 		FirstPicture = pic;
