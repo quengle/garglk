@@ -1886,6 +1886,10 @@ gms_graphics_paint_everything (winid_t glk_window, glui32 palette[],
    the png is indexed, uncompressed (stored deflate blocks): small pictures, and no zlib in the build */
 glui32 quengle_add_image (const unsigned char *buf, glui32 len);
 
+/* the picture last asked for, kept in emu.c's autosave so a continue can show it again */
+type32 quengle_picture = 0;
+type8 quengle_picture_mode = 0;
+
 static glui32
 quengle_crc (const unsigned char *p, size_t n)
 {
@@ -2476,6 +2480,10 @@ ms_showpic (type32 picture, type8 mode)
   static glui32 current_crc = 0;  /* CRC of the current picture */
 
   type8 *bitmap, animated;
+#ifdef QUENGLE
+  quengle_picture = picture;
+  quengle_picture_mode = mode;
+#endif
   type16 width, height, palette[GMS_PALETTE_SIZE];
   long picture_bytes;
   glui32 crc;
@@ -5662,6 +5670,16 @@ ms_getchar (type8 trans)
   assert (gms_input_cursor < gms_input_length);
   return gms_input_buffer[gms_input_cursor++];
 }
+
+
+#ifdef QUENGLE
+/* for emu.c's autosave: TRUE while a typed line is still being handed out a character at a time */
+int
+quengle_input_pending (void)
+{
+  return gms_input_cursor < gms_input_length;
+}
+#endif
 
 
 /*
