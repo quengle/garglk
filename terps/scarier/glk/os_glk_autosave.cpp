@@ -323,7 +323,12 @@ static std::string
 gsc_a5_serialize_all (void)
 {
   size_t length = 0;
+#ifdef QUENGLE
+  /* lean: no runner-interop body (87% of a full save), as the undo stack */
+  char *blob = a5run_save_lean (gsc_a5_run, &length);
+#else
   char *blob = a5run_save (gsc_a5_run, &length);
+#endif
   const char *text;
   size_t text_length;
   int depth, i;

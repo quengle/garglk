@@ -1008,6 +1008,14 @@ a5run_save (a5_run_t *run, size_t *out_len)
   return a5run_save_blob (run, out_len, 0);
 }
 
+#ifdef QUENGLE
+char *
+a5run_save_lean (a5_run_t *run, size_t *out_len)
+{
+  return a5run_save_blob (run, out_len, 1);
+}
+#endif
+
 /* strtol on a child's text (0 when absent). */
 static long
 child_long (const a5_xml_node_t *n, const char *name)
