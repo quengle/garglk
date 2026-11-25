@@ -135,6 +135,8 @@ static void LineInput(void)
         QuengleAutosave();
         if (QuengleSkipPrompt) {
             QuengleSkipPrompt = 0;
+            /* the newline set above would be flushed below, and the typed command would land under the prompt */
+            LastChar = 0;
         } else
 #endif
         if (Version == QUESTPROBE3_TYPE) {
