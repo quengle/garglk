@@ -7123,7 +7123,8 @@ void screen_read_bfhs(IO &io, SaveType savetype)
 
     ScopeGuard guard([&banners, &saved, &write] {
         if (banners) {
-            write("[End of history playback]\n\n");
+            // quengle: no marker, the replay is meant to be seamless
+            write("\n");
         }
         *mainwin = saved;
         set_window_style(mainwin);
