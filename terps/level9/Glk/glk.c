@@ -4004,8 +4004,12 @@ gln_status_notify (void)
 {
   if (gln_status_window)
     gln_status_update ();
+#ifndef QUENGLE
+  /* quengle: not the "[ game name …padding… ]" line in the story: the app shows the title, and the padding
+     wrapped its "]" onto a line of its own */
   else
     gln_status_print ();
+#endif
 }
 
 
